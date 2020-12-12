@@ -4,7 +4,9 @@
   "description": "A project and data management tool for anime production",
   "main": "index.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "watch": "elm-live client/Main.elm --open -- --output=public/main.js --debug",
+    "build": "elm make ./client/Main.elm --output=public/main.js"
   },
   "repository": {
     "type": "git",
@@ -16,7 +18,8 @@
     "url": "https://github.com/fujiy/Gaufre/issues"
   },
   "homepage": "https://github.com/fujiy/Gaufre#readme",
-  "dependencies": {
-    "googleapis": "^66.0.0"
+  "dependencies": {},
+  "devDependencies": {
+    "elm-live": "^4.0.2"
   }
 }

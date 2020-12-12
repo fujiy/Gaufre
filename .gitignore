@@ -1,7 +1,10 @@
 elm-stuff
 node_modules
-dist
+.firebase
+.firebaserc
+public/main.js
 
-/config.js
+*.log
+
 
 .DS_Store
