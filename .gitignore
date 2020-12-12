@@ -1,4 +1,7 @@
 elm-stuff
 node_modules
+dist
+
+/config.js
 
 .DS_Store

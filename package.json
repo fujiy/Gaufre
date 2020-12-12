@@ -15,5 +15,8 @@
   "bugs": {
     "url": "https://github.com/fujiy/Gaufre/issues"
   },
-  "homepage": "https://github.com/fujiy/Gaufre#readme"
+  "homepage": "https://github.com/fujiy/Gaufre#readme",
+  "dependencies": {
+    "googleapis": "^66.0.0"
+  }
 }
