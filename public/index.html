@@ -45,15 +45,7 @@
         //
 
            const app = Elm.Main.init(
-               { node: document.getElementById('myapp'),
-                 flags: {
-                     credentials: credentials,
-                     codeVerifier: localStorage.getItem("codeVerifier") || "",
-                     state: localStorage.getItem("state") || "",
-                     token: localStorage.getItem("token") || "",
-
-                 }
-               }
+               { node: document.getElementById('myapp')}
            );
            /* app.ports.setLocalStorage.subscribe(req => {
             *     localStorage.setItem(req[0], req[1]);
