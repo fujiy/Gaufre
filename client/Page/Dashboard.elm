@@ -4,7 +4,10 @@ import Element as El exposing (Element)
 import View.Menu as Menu
 import View.Text as Text
 
-type Msg = SignOut
+
+type Msg
+    = SignOut
+
 
 view : Element Msg
 view =

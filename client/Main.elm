@@ -12,29 +12,43 @@ import Url exposing (Url)
 
 
 port setLocalStorage : ( String, String ) -> Cmd msg
+
+
 port signIn : () -> Cmd msg
+
+
 port signOut : () -> Cmd msg
-port authorized : ({ user : User, token: String } -> msg) -> Sub msg
+
+
+port authorized : ({ user : User, token : String } -> msg) -> Sub msg
+
 
 
 -- Model -----------------------------------------------------------------------
 
-type alias User = { name : String }
+
+type alias User =
+    { name : String }
+
 
 type Model
     = NotSignedIn
     | SignedIn
         { token : String
-        , user: User
+        , user : User
         , page : Page
         }
+
 
 type Page
     = Dashboard
 
 
 init : () -> Url -> Nav.Key -> ( Model, Cmd Msg )
-init flags origin navKey = ( NotSignedIn, Cmd.none)
+init flags origin navKey =
+    ( NotSignedIn, Cmd.none )
+
+
 
 -- Update ----------------------------------------------------------------------
 
@@ -44,7 +58,8 @@ type Msg
     | ClickedLink Browser.UrlRequest
     | SignIn
     | SignOut
-    | Authorized { user : User, token: String }
+    | Authorized { user : User, token : String }
+
 
 update : Msg -> Model -> ( Model, Cmd Msg )
 update msg model =
@@ -52,17 +67,24 @@ update msg model =
         NotSignedIn ->
             case msg of
                 SignIn ->
-                    ( model, signIn ())
+                    ( model, signIn () )
+
                 Authorized r ->
-                    (SignedIn
-                         {user = r.user, token = r.token, page = Dashboard }
-                    , Cmd.none)
-                _ -> ( model, Cmd.none )
+                    ( SignedIn
+                        { user = r.user, token = r.token, page = Dashboard }
+                    , Cmd.none
+                    )
+
+                _ ->
+                    ( model, Cmd.none )
+
         SignedIn _ ->
             case msg of
                 SignOut ->
-                    ( model, signOut ())
-                _ -> ( model, Cmd.none )
+                    ( model, signOut () )
+
+                _ ->
+                    ( model, Cmd.none )
 
 
 https : Url
@@ -101,11 +123,11 @@ view model =
             NotSignedIn ->
                 [ El.layout [] <| El.map (always SignIn) Entrance.view ]
 
-            SignedIn {user, token, page } ->
-                [El.layout [] <|
-                     case page of
-                         Dashboard ->
-                             El.map (always SignOut) Page.Dashboard.view
+            SignedIn { user, token, page } ->
+                [ El.layout [] <|
+                    case page of
+                        Dashboard ->
+                            El.map (always SignOut) Page.Dashboard.view
                 ]
     }
 
