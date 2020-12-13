@@ -5,7 +5,7 @@
   "main": "index.js",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
-    "watch": "elm-live client/Main.elm --open -- --output=public/main.js --debug",
+    "watch": "elm-live client/Main.elm  -- --output=public/main.js --debug",
     "build": "elm make ./client/Main.elm --output=public/main.js"
   },
   "repository": {

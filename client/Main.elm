@@ -2,9 +2,12 @@ port module Main exposing (..)
 
 import Browser exposing (Document, application)
 import Browser.Navigation as Nav
+import Element as El
 import Html exposing (..)
 import Html.Events as Events
 import Http
+import Page.Dashboard
+import Page.Entrance as Entrance
 import Url exposing (Url)
 
 
@@ -23,10 +26,11 @@ type Model
     | SignedIn
         { token : String
         , user: User
+        , page : Page
         }
 
 type Page
-    = Home
+    = Dashboard
 
 
 init : () -> Url -> Nav.Key -> ( Model, Cmd Msg )
@@ -50,7 +54,9 @@ update msg model =
                 SignIn ->
                     ( model, signIn ())
                 Authorized r ->
-                    (SignedIn r, Cmd.none)
+                    (SignedIn
+                         {user = r.user, token = r.token, page = Dashboard }
+                    , Cmd.none)
                 _ -> ( model, Cmd.none )
         SignedIn _ ->
             case msg of
@@ -89,20 +95,17 @@ uncurry f ( a, b ) =
 
 view : Model -> Document Msg
 view model =
-    { title = "Gaufre - Sign In"
+    { title = "Gaufre"
     , body =
         case model of
             NotSignedIn ->
-                [ text "idle"
-                , button [ Events.onClick SignIn]
-                    [ text "sign in" ]
-                ]
+                [ El.layout [] <| El.map (always SignIn) Entrance.view ]
 
-            SignedIn {user, token } ->
-                [ text user.name
-                , text token
-                , button [ Events.onClick SignOut]
-                    [text "sign out"]
+            SignedIn {user, token, page } ->
+                [El.layout [] <|
+                     case page of
+                         Dashboard ->
+                             El.map (always SignOut) Page.Dashboard.view
                 ]
     }
 
