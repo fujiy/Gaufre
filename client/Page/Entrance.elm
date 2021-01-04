@@ -1,24 +1,39 @@
 module Page.Entrance exposing (..)
 
-import Element as El exposing (Element)
-import Html
-import Html.Attributes as Html
-import Html.Events as Html
+import Html exposing (Html, div, text)
+import Html.Attributes as Html exposing (class, style)
+import Html.Events as Html exposing (onClick)
 import View.Button as Button
-import View.Text as Text
 
 
 type Msg
     = SignIn
 
 
-view : Element Msg
+view : Html Msg
 view =
-    El.column
-        [ El.centerX, El.centerY, El.spacing 5 ]
-        [ El.el [ El.centerX ] <| Text.h1 "Gaufre"
-        , El.el [ El.centerX ] <| El.text "A project and data management tool"
-        , El.el [ El.centerX ] <| El.text "for anime production"
-        , El.el [ El.centerX, El.padding 10 ] <|
-            Button.primary SignIn "Sign In with Google"
+    div
+        [ class "ui grid middle aligned"
+        , style "height" "100vh"
+        , style "width" "100%"
+        , style "margin" "0px"
+        ]
+        [ div [ class "row" ]
+            [ div [ class "column" ]
+                [ div
+                    [ class "ui centered card" ]
+                    [ div [ class "content" ]
+                        [ div [ class "center aligned header" ] [ text "Gaufre" ]
+                        , div [ class "center aligned description" ]
+                            [ text """A project and data management tool for
+                                    anime production""" ]
+                        ]
+                    , div
+                        [ class "ui bottom attached primary button"
+                        , onClick SignIn
+                        ]
+                        [ text "Sign In with Google" ]
+                    ]
+                ]
+            ]
         ]

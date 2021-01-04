@@ -1,11 +1,10 @@
 module View.Menu exposing (..)
 
-import Element as El exposing (Element)
-import Html.Attributes as Html
+import Html exposing (..)
+import Html.Attributes exposing (..)
 
 
-bar : List (Element msg) -> Element msg
-bar contents =
-    El.row
-        [ El.htmlAttribute <| Html.class "ui menu" ]
-        contents
+bar : List (Html msg) -> Html msg
+bar =
+    div
+        [ class "ui secondary pointing menu" ]

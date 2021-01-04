@@ -1,16 +1,14 @@
 module View.Button exposing (..)
 
-import Element as El exposing (Element)
-import Html
-import Html.Attributes as Html
-import Html.Events as Html
+import Html exposing (..)
+import Html.Attributes exposing (..)
+import Html.Events exposing (..)
 
 
-primary : msg -> String -> Element msg
+primary : msg -> String -> Html msg
 primary msg text =
-    El.html <|
-        Html.button
-            [ Html.onClick msg
-            , Html.class "ui primary button"
-            ]
-            [ Html.text text ]
+    button
+        [ onClick msg
+        , class "ui primary button"
+        ]
+        [ Html.text text ]

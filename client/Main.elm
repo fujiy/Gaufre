@@ -3,10 +3,8 @@ port module Main exposing (..)
 import Browser exposing (Document, application)
 import Browser.Navigation as Nav
 import Data exposing (Auth, Data)
-import Element as El
 import Firestore as Firestore exposing (Firestore)
 import Firestore.Decode as Decode
-import Firestore.Element as El
 import Firestore.Update as Update
 import Html exposing (..)
 import Html.Events as Events
@@ -100,7 +98,7 @@ update msg model =
         SignedIn r ->
             case msg of
                 SignOut ->
-                    ( model, signOut () )
+                    ( NotSignedIn, signOut () )
 
                 FirestoreUpdate firestore ->
                     let
@@ -142,14 +140,13 @@ view model =
     , body =
         case model of
             NotSignedIn ->
-                [ El.layout [] <| El.map (always SignIn) Entrance.view ]
+                [ Html.map (always SignIn) Entrance.view ]
 
             SignedIn { auth, firestore, page } ->
-                [ El.layout [] <|
-                    case page of
-                        Dashboard ->
-                            El.map (always SignOut) <|
-                                Page.Dashboard.view auth firestore
+                [ case page of
+                    Dashboard ->
+                        Html.map (always SignOut) <|
+                            Page.Dashboard.view auth firestore
                 ]
     }
 

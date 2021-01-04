@@ -1,31 +1,30 @@
-module Firestore.Element exposing (doc, doc_, firestore, get, get_, list, list_)
+module Firestore.Html exposing (doc, doc_, firestore, get, get_, list, list_)
 
 import Array
 import Dict
-import Element as El exposing (Attribute, Element)
 import Firestore.Internal exposing (..)
-import Html
+import Html exposing (Attribute, Html)
 import Html.Attributes as Html
 import Html.Events as Html
 import Json.Decode
 import Json.Encode
 
 
-firestore : Firestore r -> (r -> Element msg) -> Element msg
+firestore : Firestore r -> (r -> Html msg) -> Html msg
 firestore (Firestore d) view =
     view d.data
 
 
-doc : Collection r -> Id -> (r -> Element msg) -> Element msg
+doc : Collection r -> Id -> (r -> Html msg) -> Html msg
 doc col id view =
     doc_ col id <|
         \rr ->
             case rr of
                 Failure ->
-                    El.none
+                    Html.text ""
 
                 Loading ->
-                    El.none
+                    Html.text ""
 
                 Committing r ->
                     view r
@@ -37,8 +36,8 @@ doc col id view =
 doc_ :
     Collection r
     -> Id
-    -> (Remote r -> Element msg)
-    -> Element msg
+    -> (Remote r -> Html msg)
+    -> Html msg
 doc_ (Collection { path, documents }) id view =
     requireData (Array.push id path) <|
         case Dict.get id documents of
@@ -49,7 +48,7 @@ doc_ (Collection { path, documents }) id view =
                 view d.data
 
 
-list : Collection r -> (List ( Id, r ) -> Element msg) -> Element msg
+list : Collection r -> (List ( Id, r ) -> Html msg) -> Html msg
 list col f =
     list_ col
         (List.filterMap
@@ -73,8 +72,8 @@ list col f =
 
 list_ :
     Collection r
-    -> (List ( Id, Remote r ) -> Element msg)
-    -> Element msg
+    -> (List ( Id, Remote r ) -> Html msg)
+    -> Html msg
 list_ (Collection c) view =
     requireData c.path <|
         let
@@ -93,16 +92,16 @@ list_ (Collection c) view =
         view docs
 
 
-get : Reference r -> (r -> Element msg) -> Element msg
+get : Reference r -> (r -> Html msg) -> Html msg
 get ref view =
     get_ ref <|
         \rr ->
             case rr of
                 Failure ->
-                    El.none
+                    Html.text ""
 
                 Loading ->
-                    El.none
+                    Html.text ""
 
                 Committing r ->
                     view r
@@ -113,37 +112,33 @@ get ref view =
 
 get_ :
     Reference r
-    -> (Remote r -> Element msg)
-    -> Element msg
+    -> (Remote r -> Html msg)
+    -> Html msg
 get_ (Reference path (Document d)) view =
     requireReferencedData path d.path <| view d.data
 
 
-requireData : Path -> Element msg -> Element msg
+requireData : Path -> Html msg -> Html msg
 requireData path el =
-    El.el
-        [ El.behindContent <|
-            El.html <|
-                Html.node "data-requester"
-                    [ Html.property "path" <| encodeRef path
-                    ]
-                    []
+    Html.div []
+        [ Html.node "data-requester"
+            [ Html.property "path" <| encodeRef path
+            ]
+            []
+        , el
         ]
-        el
 
 
-requireReferencedData : Path -> Path -> Element msg -> Element msg
+requireReferencedData : Path -> Path -> Html msg -> Html msg
 requireReferencedData path ref el =
-    El.el
-        [ El.behindContent <|
-            El.html <|
-                Html.node "data-requester"
-                    [ Html.property "path" <| encodeRef path
-                    , Html.property "reference" <| encodeRef ref
-                    ]
-                    []
+    Html.div []
+        [ Html.node "data-requester"
+            [ Html.property "path" <| encodeRef path
+            , Html.property "reference" <| encodeRef ref
+            ]
+            []
+        , el
         ]
-        el
 
 
 encodeRef : Path -> Json.Encode.Value
