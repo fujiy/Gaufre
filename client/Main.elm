@@ -2,10 +2,16 @@ port module Main exposing (..)
 
 import Browser exposing (Document, application)
 import Browser.Navigation as Nav
+import Data exposing (Auth, Data)
 import Element as El
+import Firestore as Firestore exposing (Firestore)
+import Firestore.Decode as Decode
+import Firestore.Element as El
+import Firestore.Update as Update
 import Html exposing (..)
 import Html.Events as Events
 import Http
+import Json.Decode as Json
 import Page.Dashboard
 import Page.Entrance as Entrance
 import Url exposing (Url)
@@ -20,23 +26,25 @@ port signIn : () -> Cmd msg
 port signOut : () -> Cmd msg
 
 
-port authorized : ({ user : User, token : String } -> msg) -> Sub msg
+port authorized : ({ name : String, uid : String, token : String } -> msg) -> Sub msg
+
+
+port watcherPort : Firestore.WatcherPort msg
+
+
+port updatePort : Firestore.UpdaterPort msg
 
 
 
 -- Model -----------------------------------------------------------------------
 
 
-type alias User =
-    { name : String }
-
-
 type Model
     = NotSignedIn
     | SignedIn
-        { token : String
-        , user : User
+        { auth : Data.Auth
         , page : Page
+        , firestore : Firestore Data.Data
         }
 
 
@@ -58,7 +66,8 @@ type Msg
     | ClickedLink Browser.UrlRequest
     | SignIn
     | SignOut
-    | Authorized { user : User, token : String }
+    | Authorized Auth
+    | FirestoreUpdate (Firestore Data)
 
 
 update : Msg -> Model -> ( Model, Cmd Msg )
@@ -69,19 +78,36 @@ update msg model =
                 SignIn ->
                     ( model, signIn () )
 
-                Authorized r ->
+                Authorized auth ->
+                    let
+                        ( firestore, cmd ) =
+                            Firestore.update updatePort
+                                Data.encode
+                                (Data.initClient auth)
+                                (Firestore.init Data.decode)
+                    in
                     ( SignedIn
-                        { user = r.user, token = r.token, page = Dashboard }
-                    , Cmd.none
+                        { auth = auth
+                        , page = Dashboard
+                        , firestore = firestore
+                        }
+                    , cmd
                     )
 
                 _ ->
                     ( model, Cmd.none )
 
-        SignedIn _ ->
+        SignedIn r ->
             case msg of
                 SignOut ->
                     ( model, signOut () )
+
+                FirestoreUpdate firestore ->
+                    let
+                        ( fs, cmd ) =
+                            Firestore.digest updatePort Data.encode firestore
+                    in
+                    ( SignedIn { r | firestore = fs }, cmd )
 
                 _ ->
                     ( model, Cmd.none )
@@ -106,11 +132,6 @@ endpoint =
     }
 
 
-uncurry : (a -> b -> c) -> ( a, b ) -> c
-uncurry f ( a, b ) =
-    f a b
-
-
 
 -- View ------------------------------------------------------------------------
 
@@ -123,11 +144,12 @@ view model =
             NotSignedIn ->
                 [ El.layout [] <| El.map (always SignIn) Entrance.view ]
 
-            SignedIn { user, token, page } ->
+            SignedIn { auth, firestore, page } ->
                 [ El.layout [] <|
                     case page of
                         Dashboard ->
-                            El.map (always SignOut) Page.Dashboard.view
+                            El.map (always SignOut) <|
+                                Page.Dashboard.view auth firestore
                 ]
     }
 
@@ -138,7 +160,13 @@ view model =
 
 subscriptions : Model -> Sub Msg
 subscriptions model =
-    authorized Authorized
+    case model of
+        NotSignedIn ->
+            authorized Authorized
+
+        SignedIn { firestore } ->
+            Firestore.watch watcherPort Data.decode firestore
+                |> Sub.map FirestoreUpdate
 
 
 

@@ -25,38 +25,44 @@
     <script defer src="/__/firebase/init.js?useEmulator=true"></script>
 
     <script defer src="main.js"></script>
+    <script defer src="firestore.js"></script>
+
     <link
         async
         rel="stylesheet"
         href="//cdn.jsdelivr.net/npm/semantic-ui@2.4.0/dist/semantic.min.css"
     />
-    <script
-        async
-        src="//cdn.jsdelivr.net/npm/semantic-ui@2.4.0/dist/semantic.min.js"
-    ></script>
+    <!-- <script
+         async
+         src="//cdn.jsdelivr.net/npm/semantic-ui@2.4.0/dist/semantic.min.js"
+         ></script> -->
   </head>
   <body>
       <div id="app"></div>
       <script>
+
       document.addEventListener('DOMContentLoaded', function() {
-        const loadEl = document.querySelector('#load');
-        // // 🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥
-        // // The Firebase SDK is initialized and available here!
-        //
-        // firebase.auth().onAuthStateChanged(user => { });
-        // firebase.database().ref('/path/to/ref').on('value', snapshot => { });
-        // firebase.firestore().doc('/foo/bar').get().then(() => { });
-        // firebase.functions().httpsCallable('yourFunction')().then(() => { });
-        // firebase.messaging().requestPermission().then(() => { });
-        // firebase.storage().ref('/path/to/ref').getDownloadURL().then(() => { });
-        // firebase.analytics(); // call to activate
-        // firebase.analytics().logEvent('tutorial_completed');
-        // firebase.performance(); // call to activate
-        //
+           const loadEl = document.querySelector('#load');
+           // // 🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥🔥
+           // // The Firebase SDK is initialized and available here!
+           //
+           // firebase.auth().onAuthStateChanged(user => { });
+           // firebase.database().ref('/path/to/ref').on('value', snapshot => { });
+           // firebase.firestore().doc('/foo/bar').get().then(() => { });
+           // firebase.functions().httpsCallable('yourFunction')().then(() => { });
+           // firebase.messaging().requestPermission().then(() => { });
+           // firebase.storage().ref('/path/to/ref').getDownloadURL().then(() => { });
+           // firebase.analytics(); // call to activate
+           // firebase.analytics().logEvent('tutorial_completed');
+           // firebase.performance(); // call to activate
+           //
+
+           appNode = document.getElementById('app')
 
            const app = Elm.Main.init(
-               { node: document.getElementById('myapp')}
+               { node: appNode }
            );
+
            /* app.ports.setLocalStorage.subscribe(req => {
             *     localStorage.setItem(req[0], req[1]);
             * }) */
@@ -75,7 +81,8 @@
                    user.getIdToken().then(token => {
                        console.log(user, token)
                        app.ports.authorized.send(
-                           {user: {name: user.displayName},
+                           {name: user.displayName,
+                            uid: user.uid,
                             token: token
                            })
                    })
@@ -88,6 +95,8 @@
            }).catch(error => {
                console.log('auth failed', error);
            })
+
+           initialize(app)
        });
     </script>
   </body>
