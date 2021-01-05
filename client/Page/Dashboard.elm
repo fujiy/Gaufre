@@ -20,22 +20,4 @@ view auth =
     flip FS.firestore <|
         \data ->
             div []
-                [ div [ class "ui secondary pointing menu" ]
-                    [ div [ class "header item" ] [ text "Gaufre" ]
-                    , a [ class "item active" ] [ text "Dashboard" ]
-                    , a [ class "item" ] [ text "Direct" ]
-                    , a [ class "item" ] [ text "Manage" ]
-                    , a [ class "item" ] [ text "Create" ]
-                    , div [ class "right menu" ]
-                        [ a
-                            [ class "browse item"
-                            , onClick SignOut
-                            ]
-                            [ FS.doc data.users auth.uid <|
-                                \user -> Html.text user.name
-                            ]
-                        ]
-                    ]
-                , div [ class "ui fluid popup bottom right transition hidden" ]
-                    [ Button.primary SignOut "Sign Out" ]
-                ]
+                []

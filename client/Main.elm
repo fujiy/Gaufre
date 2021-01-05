@@ -6,10 +6,12 @@ import Data exposing (Auth, Data)
 import Firestore as Firestore exposing (Firestore)
 import Firestore.Decode as Decode
 import Firestore.Update as Update
+import GDrive
 import Html exposing (..)
 import Html.Events as Events
 import Http
 import Json.Decode as Json
+import Page
 import Page.Dashboard
 import Page.Entrance as Entrance
 import Url exposing (Url)
@@ -41,13 +43,9 @@ type Model
     = NotSignedIn
     | SignedIn
         { auth : Data.Auth
-        , page : Page
+        , page : Page.Page
         , firestore : Firestore Data.Data
         }
-
-
-type Page
-    = Dashboard
 
 
 init : () -> Url -> Nav.Key -> ( Model, Cmd Msg )
@@ -66,6 +64,7 @@ type Msg
     | SignOut
     | Authorized Auth
     | FirestoreUpdate (Firestore Data)
+    | Page Page.Msg
 
 
 update : Msg -> Model -> ( Model, Cmd Msg )
@@ -86,7 +85,7 @@ update msg model =
                     in
                     ( SignedIn
                         { auth = auth
-                        , page = Dashboard
+                        , page = Page.init
                         , firestore = firestore
                         }
                     , cmd
@@ -106,6 +105,20 @@ update msg model =
                             Firestore.digest updatePort Data.encode firestore
                     in
                     ( SignedIn { r | firestore = fs }, cmd )
+
+                Page m ->
+                    case m of
+                        Page.SignOut ->
+                            ( NotSignedIn, signOut () )
+
+                        _ ->
+                            let
+                                ( page, cmd ) =
+                                    Page.update r.auth m r.page
+                            in
+                            ( SignedIn { r | page = page }
+                            , Cmd.map Page cmd
+                            )
 
                 _ ->
                     ( model, Cmd.none )
@@ -143,11 +156,7 @@ view model =
                 [ Html.map (always SignIn) Entrance.view ]
 
             SignedIn { auth, firestore, page } ->
-                [ case page of
-                    Dashboard ->
-                        Html.map (always SignOut) <|
-                            Page.Dashboard.view auth firestore
-                ]
+                [ Html.map Page <| Page.view auth firestore page ]
     }
 
 

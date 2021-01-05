@@ -7,6 +7,10 @@ import Firestore.Update as Update
 import Json.Decode as Json
 
 
+type alias Id =
+    String
+
+
 type alias Firestore r =
     Internal.Firestore r
 
