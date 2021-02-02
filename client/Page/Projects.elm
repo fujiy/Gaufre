@@ -1,6 +1,10 @@
 module Page.Projects exposing (..)
 
 import Data exposing (Auth, Data)
+import Data.Project as Project
+import Data.User as User
+import Firestore
+import Firestore.Update as Update exposing (Updater)
 import GDrive
 import Html exposing (Html, a, div, i, input, node, span, text)
 import Html.Attributes as Html exposing (attribute, class, placeholder, style, type_)
@@ -23,28 +27,34 @@ type Msg
     | HideModal
     | Search String
     | SearchResult (List GDrive.FileMeta)
+    | AddProject GDrive.FileMeta
 
 
-update : Auth -> Msg -> Model -> ( Model, Cmd Msg )
+update : Auth -> Msg -> Model -> ( Model, Updater Data, Cmd Msg )
 update auth msg model =
     case ( msg, model ) of
         ( ShowModal, _ ) ->
             ( SearchFolder { loading = False, wait = Nothing, result = [] }
+            , Update.none
             , Cmd.none
             )
 
         ( HideModal, _ ) ->
-            ( List, Cmd.none )
+            ( List, Update.none, Cmd.none )
 
         ( Search "", _ ) ->
-            ( model, Cmd.none )
+            ( model, Update.none, Cmd.none )
 
         ( Search s, SearchFolder o ) ->
             if o.loading then
-                ( SearchFolder { o | wait = Just s }, Cmd.none )
+                ( SearchFolder { o | wait = Just s }
+                , Update.none
+                , Cmd.none
+                )
 
             else
                 ( SearchFolder { o | loading = True, wait = Nothing }
+                , Update.none
                 , GDrive.folders auth.token s
                     |> Cmd.map
                         (\r ->
@@ -62,12 +72,14 @@ update auth msg model =
             case o.wait of
                 Nothing ->
                     ( SearchFolder { o | loading = False, result = files }
+                    , Update.none
                     , Cmd.none
                     )
 
                 Just s ->
                     ( SearchFolder
                         { o | loading = True, wait = Nothing, result = files }
+                    , Update.none
                     , GDrive.folders auth.token s
                         |> Cmd.map
                             (\r ->
@@ -81,21 +93,46 @@ update auth msg model =
                             )
                     )
 
+        ( AddProject file, _ ) ->
+            let
+                projectRef =
+                    Firestore.ref [ "projects", file.id ]
+
+                userRef =
+                    Firestore.ref [ "users", auth.uid ]
+            in
+            ( model
+            , Update.updates
+                [ Update.collection Data.usersLens <|
+                    Update.doc auth.uid <|
+                        Update.modify User.encode <|
+                            \user ->
+                                { user | projects = List.append user.projects [ projectRef ] }
+                , Update.collection Data.projectsLens <|
+                    Update.doc file.id <|
+                        Update.alter Project.encode <|
+                            \mp ->
+                                Just <|
+                                    case mp of
+                                        Nothing ->
+                                            User.Project
+                                                { name = file.name
+                                                , members = [ userRef ]
+                                                }
+
+                                        Just (User.Project p) ->
+                                            User.Project
+                                                { p | members = userRef :: p.members }
+                ]
+            , Cmd.none
+            )
+
         _ ->
-            ( model, Cmd.none )
+            ( model, Update.none, Cmd.none )
 
 
 view : Auth -> Data -> Model -> Html Msg
 view auth data model =
-    let
-        showModal =
-            case model of
-                SearchFolder _ ->
-                    True
-
-                _ ->
-                    False
-    in
     div []
         [ div [ class "ui cards", style "margin" "20px" ] <|
             a
@@ -110,41 +147,58 @@ view auth data model =
                     ]
                 ]
                 :: []
-        , node "ui-modal"
-            [ boolAttr "show" showModal
-            , class "ui tiny modal"
-            , on "hide" <| Decode.succeed HideModal
-            ]
-            [ div [ class "header" ]
-                [ text "Select a project folder in your Google Drive" ]
-            , case model of
-                SearchFolder { result, loading } ->
-                    div [ class "content" ]
-                        [ div
-                            [ class "ui fluid search"
-                            , classIf loading "loading"
-                            ]
-                            [ div [ class "ui icon fluid input" ]
-                                [ input
-                                    [ class "propt"
-                                    , type_ "text"
-                                    , placeholder "Folder names..."
-                                    , onInput Search
-                                    ]
-                                    []
-                                , i [ class "search icon" ] []
-                                ]
-                            ]
-                        , div [ class "ui link items" ] <|
-                            flip List.map result <|
-                                \file ->
-                                    div [ class "item" ]
-                                        [ a [ class "header" ]
-                                            [ text file.name ]
-                                        ]
-                        ]
+        , searchModal auth data model
+        ]
+
+
+searchModal : Auth -> Data -> Model -> Html Msg
+searchModal auth data model =
+    let
+        showModal =
+            case model of
+                SearchFolder _ ->
+                    True
 
                 _ ->
-                    text ""
-            ]
+                    False
+    in
+    node "ui-modal"
+        [ boolAttr "show" showModal
+        , class "ui tiny modal"
+        , on "hide" <| Decode.succeed HideModal
+        ]
+        [ div [ class "header" ]
+            [ text "Select a project folder in your Google Drive" ]
+        , case model of
+            SearchFolder { result, loading } ->
+                div [ class "content" ]
+                    [ div
+                        [ class "ui fluid search"
+                        , classIf loading "loading"
+                        ]
+                        [ div [ class "ui icon fluid input" ]
+                            [ input
+                                [ class "propt"
+                                , type_ "text"
+                                , placeholder "Folder names..."
+                                , onInput Search
+                                ]
+                                []
+                            , i [ class "search icon" ] []
+                            ]
+                        ]
+                    , div [ class "ui link items" ] <|
+                        flip List.map result <|
+                            \file ->
+                                div [ class "item" ]
+                                    [ a
+                                        [ class "header"
+                                        , onClick <| AddProject file
+                                        ]
+                                        [ text file.name ]
+                                    ]
+                    ]
+
+            _ ->
+                text ""
         ]

@@ -114,8 +114,8 @@ get_ :
     Reference r
     -> (Remote r -> Html msg)
     -> Html msg
-get_ (Reference path (Document d)) view =
-    requireReferencedData path d.path <| view d.data
+get_ (Reference (Document d)) view =
+    requireData d.path <| view d.data
 
 
 requireData : Path -> Html msg -> Html msg

@@ -8,8 +8,12 @@ type alias Token =
     String
 
 
+type alias Id =
+    String
+
+
 type alias FileMeta =
-    { id : String
+    { id : Id
     , name : String
     }
 

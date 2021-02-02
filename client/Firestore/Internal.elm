@@ -91,7 +91,7 @@ type Document r
 
 
 type Reference r
-    = Reference Path (Document r)
+    = Reference (Document r)
 
 
 type Value a
@@ -107,6 +107,7 @@ type alias Updates a =
     , documents : Array ( Path, DocumentUpdates )
     , collections : Array ( Path, CollectionUpdates )
     , laters : Updater a
+    , requests : Array Path
     }
 
 
@@ -120,9 +121,14 @@ type CollectionUpdates
     = Add (Value ())
 
 
+mapDocument : (a -> b) -> Document a -> Document b
+mapDocument f (Document { path, data }) =
+    Document { path = path, data = mapRemote f data }
+
+
 noUpdates : a -> Updates a
 noUpdates a =
-    Updates a Array.empty Array.empty noUpdater
+    Updates a Array.empty Array.empty noUpdater Array.empty
 
 
 runUpdater : Updater a -> a -> Updates a
@@ -133,6 +139,11 @@ runUpdater (Updater f) =
 noUpdater : Updater a
 noUpdater =
     Updater noUpdates
+
+
+root : Path
+root =
+    Array.empty
 
 
 topLevel : Id -> Path

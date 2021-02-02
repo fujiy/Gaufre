@@ -7,6 +7,7 @@ import Firestore.Encode as Encode exposing (Encoder)
 import Firestore.Internal as Internal exposing (..)
 import Json.Decode
 import Maybe.Extra as Maybe
+import Monocle.Lens exposing (Lens)
 import Util exposing (..)
 
 
@@ -19,6 +20,11 @@ updates upds =
     List.foldr both noUpdater upds
 
 
+none : Updater a
+none =
+    noUpdater
+
+
 firestore : Updater r -> Updater (Firestore r)
 firestore upd =
     Updater <|
@@ -28,18 +34,17 @@ firestore upd =
 
 
 collection :
-    (r -> Collection a)
-    -> (r -> Collection a -> r)
+    Lens r (Collection a)
     -> Updater (Collection a)
     -> Updater r
-collection getter setter upd =
+collection lens upd =
     Updater <|
         \r ->
-            getter r
+            lens.get r
                 |> runUpdater upd
                 |> mapUpdates
-                    (setter r)
-                    (collection getter setter)
+                    (flip lens.set r)
+                    (collection lens)
 
 
 doc : Id -> Updater (Document r) -> Updater (Collection r)
@@ -99,8 +104,13 @@ add enc d =
 --             }
 
 
-update : Encoder (Document r) -> (Maybe r -> Maybe r) -> Updater (Document r)
-update enc f =
+modify : Encoder (Document r) -> (r -> r) -> Updater (Document r)
+modify enc f =
+    alter enc <| Maybe.map f
+
+
+alter : Encoder (Document r) -> (Maybe r -> Maybe r) -> Updater (Document r)
+alter enc f =
     Updater <|
         \(Document old) ->
             let
@@ -113,7 +123,7 @@ update enc f =
                 upd =
                     noUpdates <| Document old
 
-                modify a =
+                mod a =
                     case f <| Just a of
                         Nothing ->
                             { upd
@@ -132,7 +142,10 @@ update enc f =
             in
             case old.data of
                 Loading ->
-                    { upd | laters = update enc f }
+                    { upd
+                        | laters = alter enc f
+                        , requests = singleton old.path
+                    }
 
                 Failure ->
                     case f <| Nothing of
@@ -149,10 +162,10 @@ update enc f =
                             }
 
                 Committing a ->
-                    modify a
+                    mod a
 
                 UpToDate a ->
-                    modify a
+                    mod a
 
 
 default : Encoder (Document r) -> r -> Updater (Document r)
@@ -213,15 +226,17 @@ both (Updater f) (Updater g) =
             , documents = Array.append ux.documents uy.documents
             , collections = Array.append ux.collections uy.collections
             , laters = both ux.laters uy.laters
+            , requests = Array.append ux.requests uy.requests
             }
 
 
 mapUpdates : (a -> b) -> (Updater a -> Updater b) -> Updates a -> Updates b
-mapUpdates f uf { value, documents, collections, laters } =
+mapUpdates f uf { value, documents, collections, laters, requests } =
     { value = f value
     , documents = documents
     , collections = collections
     , laters = uf laters
+    , requests = requests
     }
 
 

@@ -78,7 +78,8 @@ update msg model =
                 Authorized auth ->
                     let
                         ( firestore, cmd ) =
-                            Firestore.update updatePort
+                            Firestore.update
+                                updatePort
                                 Data.encode
                                 (Data.initClient auth)
                                 (Firestore.init Data.decode)
@@ -113,11 +114,18 @@ update msg model =
 
                         _ ->
                             let
-                                ( page, cmd ) =
+                                ( page, upd, cmd ) =
                                     Page.update r.auth m r.page
+
+                                ( fs, updcmd ) =
+                                    Firestore.update
+                                        updatePort
+                                        Data.encode
+                                        upd
+                                        r.firestore
                             in
-                            ( SignedIn { r | page = page }
-                            , Cmd.map Page cmd
+                            ( SignedIn { r | page = page, firestore = fs }
+                            , Cmd.batch [ Cmd.map Page cmd, updcmd ]
                             )
 
                 _ ->

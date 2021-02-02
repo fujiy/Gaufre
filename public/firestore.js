@@ -12,19 +12,52 @@ customElements.define('data-requester', DataRequester);
 function initialize(app) {
     const db = firebase.firestore()
 
+
+    function encode(object) {
+        console.log(object)
+        if (typeof object != 'object') return object
+        if (object instanceof Array) {
+            let array = []
+            for (const value of object) {
+                array.push(encode(value))
+            }
+            return array
+        }
+        else if (object.__doc__) return reference(object.path)
+        else {
+            let newobj = {}
+            for (const [key, value] of Object.entries(object)) {
+                newobj[key] = encode(value)
+            }
+            return newobj
+        }
+    }
+
+    function reference(path) {
+        let ref = db;
+        let i = 0;
+        while (true) {
+            if (i >= path.length) break;
+            ref = ref.collection(path[i])
+            i++
+            if (i >= path.length) break;
+            ref = ref.doc(path[i])
+            i++
+        }
+        return ref;
+    }
+
+
     let data;
 
-    request = (path, reference) => {
-        console.log("req", path, reference)
-        db.collection(path[0]).doc(path[1]).get().then(doc => {
-            console.log(doc)
-            let document
-            if (doc.exists) {
-                document = doc.data()
-                document.path = path
-                document.status = 'uptodate'
+    request = (path, ref) => {
+        console.log("req", path, ref)
+        reference(path).get().then(doc => {
+            const document = {
+                data: doc.data(),
+                path: path,
+                status: doc.exists ? 'uptodate' : 'failure'
             }
-            else document = { path: path, status: 'failure' }
 
             data[path[0]].documents[path[1]] = document
 
@@ -32,26 +65,28 @@ function initialize(app) {
             if (app.ports.watcherPort) {
                 app.ports.watcherPort.send(data)
             }
+        }).catch(err => {
+            console.log("fetch error", err)
         })
     }
 
     if (app.ports.updatePort) {
         app.ports.updatePort.subscribe(v => {
+            console.log("update", v);
             data = v.value
             for (const upd of v.documents) {
                 switch (upd.type) {
                 case "whole":
-                    delete upd.value.path
-                    delete upd.value.status
-                    db.collection(upd.path[0]).doc(upd.path[1])
-                        .set(upd.value)
+                    const encdata = encode(upd.value.data)
+                    console.log('enc', encdata)
+                    reference(upd.path).set(encdata)
                     break
                 case "delete":
-                    db.collection(upd.path[0]).doc(upd.path[1]).delete()
+                    reference(upd.path).delete()
                     break
                 }
             }
-            console.log("update", v);
+            for (const path of v.requests) request(path, null)
         })
     }
 }

@@ -2,7 +2,7 @@ module Firestore.Decode exposing (..)
 
 import Array exposing (Array)
 import Dict exposing (Dict)
-import Firestore.Internal exposing (..)
+import Firestore.Internal as Internal exposing (..)
 import Json.Decode as Json
 import Maybe.Extra as Maybe
 import Result
@@ -95,7 +95,7 @@ field name d =
                                 mapRemote (\f -> f r) df.data
                     }
             )
-            (Json.maybe <| Json.field name <| unDecoder d)
+            (Json.maybe <| Json.at [ "data", name ] <| unDecoder d)
         << unDecoder
 
 
@@ -125,13 +125,17 @@ document r =
             (Json.field "status" Json.string)
 
 
+mapDocument : (r -> a) -> Decoder (Document r) -> Decoder (Document a)
+mapDocument f dec =
+    map (Internal.mapDocument f) dec
+
+
 reference : Decoder (Document r) -> Decoder (Reference r)
 reference d =
     Decoder <|
-        Json.map2
-            Reference
-            (Json.field "path" <| unDecoder path)
-            (Json.field "document" <| unDecoder d)
+        Json.map (Maybe.withDefault (noDocument root) >> Reference) <|
+            Json.maybe <|
+                unDecoder d
 
 
 path : Decoder Path
@@ -184,7 +188,11 @@ null =
     Decoder << Json.null
 
 
+lazy : (() -> Decoder a) -> Decoder a
+lazy dec =
+    Decoder <| Json.lazy <| dec >> unDecoder
 
--- map : (a -> b) -> Decoder a -> Decoder b
--- map f =
---     Decoder << Json.map f << unDecoder
+
+map : (a -> b) -> Decoder a -> Decoder b
+map f =
+    Decoder << Json.map f << unDecoder

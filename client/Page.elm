@@ -3,6 +3,7 @@ module Page exposing (..)
 import Data exposing (Auth, Data)
 import Firestore exposing (Firestore)
 import Firestore.Html as FS
+import Firestore.Update as Update exposing (Updater)
 import Html exposing (Attribute, Html, a, div, i, map, span, text)
 import Html.Attributes as Html exposing (class)
 import Html.Events exposing (onClick)
@@ -26,18 +27,18 @@ init =
     Projects Projects.List
 
 
-update : Auth -> Msg -> Page -> ( Page, Cmd Msg )
+update : Auth -> Msg -> Page -> ( Page, Updater (Firestore Data), Cmd Msg )
 update auth msg page =
     case ( msg, page ) of
         ( ProjectsMsg m, Projects model ) ->
             let
-                ( model_, cmd ) =
+                ( model_, upd, cmd ) =
                     Projects.update auth m model
             in
-            ( Projects model_, Cmd.map ProjectsMsg cmd )
+            ( Projects model_, Update.firestore upd, Cmd.map ProjectsMsg cmd )
 
         _ ->
-            ( page, Cmd.none )
+            ( page, Update.none, Cmd.none )
 
 
 view : Auth -> Firestore Data -> Page -> Html Msg

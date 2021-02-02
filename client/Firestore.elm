@@ -1,5 +1,6 @@
 module Firestore exposing (..)
 
+import Array
 import Firestore.Decode as Decode exposing (Decoder)
 import Firestore.Encode as Encode exposing (Encoder)
 import Firestore.Internal as Internal exposing (..)
@@ -33,6 +34,12 @@ type alias WatcherPort msg =
 
 type alias UpdaterPort msg =
     Json.Value -> Cmd msg
+
+
+ref : List Id -> Reference r
+ref path =
+    Internal.Reference <|
+        Internal.Document { path = Array.fromList path, data = Loading }
 
 
 init : Decoder (Firestore r) -> Firestore r

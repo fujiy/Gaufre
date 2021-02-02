@@ -61,6 +61,8 @@
                    const user = googleAuth.currentUser.get()
                    if (user.isSignedIn()) signedIn(user)
 
+               }).catch(error => {
+                   console.log('gapi error', error)
                })
            })
        }

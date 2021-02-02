@@ -2,7 +2,7 @@ module Firestore.Encode exposing (..)
 
 import Array exposing (Array)
 import Dict exposing (Dict)
-import Firestore.Internal exposing (..)
+import Firestore.Internal as Internal exposing (..)
 import Json.Encode as Json
 import Maybe.Extra as Maybe
 import Util exposing (..)
@@ -68,10 +68,17 @@ document fields (Document d) =
                     )
     in
     Value <|
-        Json.object <|
-            ( "path", unValue <| path d.path )
-                :: ( "status", Json.string status )
-                :: v
+        Json.object
+            [ ( "path", unValue <| path d.path )
+            , ( "status", Json.string status )
+            , ( "__doc__", Json.bool True )
+            , ( "data", Json.object v )
+            ]
+
+
+mapDocument : (a -> r) -> Encoder (Document r) -> Encoder (Document a)
+mapDocument f enc a =
+    coerce <| enc <| Internal.mapDocument f a
 
 
 field : String -> (r -> a) -> Encoder a -> ( String, Encoder r )
@@ -80,12 +87,8 @@ field name getter enc =
 
 
 reference : Encoder (Document r) -> Encoder (Reference r)
-reference f (Reference p d) =
-    Value <|
-        Json.object
-            [ ( "path", unValue <| path p )
-            , ( "document", unValue <| f d )
-            ]
+reference f (Reference d) =
+    f d |> coerce
 
 
 path : Encoder Path
@@ -128,6 +131,16 @@ dict f =
     Value << Json.dict identity (unValue << f)
 
 
+lazy : (() -> Encoder a) -> Encoder a
+lazy f a =
+    f () a
+
+
+map : (b -> a) -> Encoder a -> Encoder b
+map f enc b =
+    coerce <| enc <| f b
+
+
 null : Value ()
 null =
     Value Json.null
@@ -139,7 +152,7 @@ coerce (Value v) =
 
 
 updates : Encoder a -> Encoder (Updates a)
-updates enc { value, documents, collections } =
+updates enc { value, documents, collections, requests } =
     Json.object
         [ ( "value", unValue <| enc value )
         , ( "documents"
@@ -167,5 +180,6 @@ updates enc { value, documents, collections } =
                                 , ( "type", Json.string "delete" )
                                 ]
           )
+        , ( "requests", Json.array (path >> unValue) requests )
         ]
         |> Value
