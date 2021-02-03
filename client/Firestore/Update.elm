@@ -5,6 +5,7 @@ import Dict
 import Firestore.Decode as Decode exposing (Decoder)
 import Firestore.Encode as Encode exposing (Encoder)
 import Firestore.Internal as Internal exposing (..)
+import Firestore.Types exposing (..)
 import Json.Decode
 import Maybe.Extra as Maybe
 import Monocle.Lens exposing (Lens)

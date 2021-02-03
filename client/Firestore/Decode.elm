@@ -3,9 +3,11 @@ module Firestore.Decode exposing (..)
 import Array exposing (Array)
 import Dict exposing (Dict)
 import Firestore.Internal as Internal exposing (..)
+import Firestore.Types exposing (..)
 import Json.Decode as Json
 import Maybe.Extra as Maybe
 import Result
+import Util exposing (..)
 
 
 type Decoder a
@@ -89,7 +91,12 @@ field name d =
                     , data =
                         case m of
                             Nothing ->
-                                Failure
+                                case df.data of
+                                    Loading ->
+                                        Loading
+
+                                    _ ->
+                                        Failure
 
                             Just r ->
                                 mapRemote (\f -> f r) df.data
@@ -131,11 +138,24 @@ mapDocument f dec =
 
 
 reference : Decoder (Document r) -> Decoder (Reference r)
-reference d =
+reference dec =
     Decoder <|
-        Json.map (Maybe.withDefault (noDocument root) >> Reference) <|
-            Json.maybe <|
-                unDecoder d
+        flip Json.map Json.value <|
+            \v ->
+                Reference <|
+                    \_ ->
+                        case Json.decodeValue (unDecoder dec) v of
+                            Ok d ->
+                                d
+
+                            Err e ->
+                                Debug.todo "ERR" e
+
+
+
+-- Document {path = root, data = Failure}
+-- Json.lazy <|
+--     \_ -> Json.map (\d -> Reference <| \_ -> d) <| unDecoder dec
 
 
 path : Decoder Path

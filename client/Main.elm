@@ -4,6 +4,7 @@ import Browser exposing (Document, application)
 import Browser.Navigation as Nav
 import Data exposing (Auth, Data)
 import Firestore as Firestore exposing (Firestore)
+import Firestore.Access as Access
 import Firestore.Decode as Decode
 import Firestore.Update as Update
 import GDrive
@@ -45,6 +46,7 @@ type Model
         { auth : Data.Auth
         , page : Page.Page
         , firestore : Firestore Data.Data
+        , view : Document Msg
         }
 
 
@@ -77,17 +79,19 @@ update msg model =
 
                 Authorized auth ->
                     let
-                        ( firestore, cmd ) =
+                        ( firestore, mview, cmd ) =
                             Firestore.update
                                 updatePort
                                 Data.encode
                                 (Data.initClient auth)
+                                (pageView auth Page.init)
                                 (Firestore.init Data.decode)
                     in
                     ( SignedIn
                         { auth = auth
                         , page = Page.init
                         , firestore = firestore
+                        , view = Maybe.withDefault (Document "Gaufre" []) mview
                         }
                     , cmd
                     )
@@ -102,10 +106,19 @@ update msg model =
 
                 FirestoreUpdate firestore ->
                     let
-                        ( fs, cmd ) =
-                            Firestore.digest updatePort Data.encode firestore
+                        ( fs, mview, cmd ) =
+                            Firestore.digest updatePort
+                                Data.encode
+                                (pageView r.auth r.page)
+                                firestore
                     in
-                    ( SignedIn { r | firestore = fs }, cmd )
+                    ( SignedIn
+                        { r
+                            | firestore = fs
+                            , view = Maybe.withDefault r.view mview
+                        }
+                    , cmd
+                    )
 
                 Page m ->
                     case m of
@@ -117,14 +130,20 @@ update msg model =
                                 ( page, upd, cmd ) =
                                     Page.update r.auth m r.page
 
-                                ( fs, updcmd ) =
+                                ( fs, mview, updcmd ) =
                                     Firestore.update
                                         updatePort
                                         Data.encode
                                         upd
+                                        (pageView r.auth r.page)
                                         r.firestore
                             in
-                            ( SignedIn { r | page = page, firestore = fs }
+                            ( SignedIn
+                                { r
+                                    | page = page
+                                    , firestore = fs
+                                    , view = Maybe.withDefault r.view mview
+                                }
                             , Cmd.batch [ Cmd.map Page cmd, updcmd ]
                             )
 
@@ -155,17 +174,26 @@ endpoint =
 -- View ------------------------------------------------------------------------
 
 
-view : Model -> Document Msg
-view model =
-    { title = "Gaufre"
-    , body =
-        case model of
-            NotSignedIn ->
-                [ Html.map (always SignIn) Entrance.view ]
+appView : Model -> Document Msg
+appView model =
+    case model of
+        NotSignedIn ->
+            { title = "Gaufre"
+            , body = [ Html.map (always SignIn) Entrance.view ]
+            }
 
-            SignedIn { auth, firestore, page } ->
-                [ Html.map Page <| Page.view auth firestore page ]
-    }
+        SignedIn { auth, firestore, view, page } ->
+            view
+
+
+pageView : Auth -> Page.Page -> Data -> Access.Accessor (Document Msg)
+pageView auth page data =
+    Access.map
+        (\{ title, body } ->
+            { title = title, body = List.map (Html.map Page) body }
+        )
+    <|
+        Page.view auth page data
 
 
 
@@ -191,7 +219,7 @@ main : Program () Model Msg
 main =
     application
         { init = init
-        , view = view
+        , view = appView
         , update = update
         , subscriptions = subscriptions
         , onUrlRequest = ClickedLink

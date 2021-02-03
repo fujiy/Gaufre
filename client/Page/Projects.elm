@@ -4,6 +4,8 @@ import Data exposing (Auth, Data)
 import Data.Project as Project
 import Data.User as User
 import Firestore
+import Firestore.Access as Access exposing (Accessor)
+import Firestore.Types exposing (Remote(..))
 import Firestore.Update as Update exposing (Updater)
 import GDrive
 import Html exposing (Html, a, div, i, input, node, span, text)
@@ -107,7 +109,10 @@ update auth msg model =
                     Update.doc auth.uid <|
                         Update.modify User.encode <|
                             \user ->
-                                { user | projects = List.append user.projects [ projectRef ] }
+                                { user
+                                    | projects =
+                                        List.append user.projects [ projectRef ]
+                                }
                 , Update.collection Data.projectsLens <|
                     Update.doc file.id <|
                         Update.alter Project.encode <|
@@ -122,7 +127,10 @@ update auth msg model =
 
                                         Just (User.Project p) ->
                                             User.Project
-                                                { p | members = userRef :: p.members }
+                                                { p
+                                                    | members =
+                                                        userRef :: p.members
+                                                }
                 ]
             , Cmd.none
             )
@@ -131,24 +139,76 @@ update auth msg model =
             ( model, Update.none, Cmd.none )
 
 
-view : Auth -> Data -> Model -> Html Msg
-view auth data model =
-    div []
-        [ div [ class "ui cards", style "margin" "20px" ] <|
-            a
-                [ class "ui card centered"
-                , onClick ShowModal
+remote : Remote a -> (a -> Html msg) -> Html msg
+remote r f =
+    case r of
+        Loading ->
+            div [ class "ui active centered inline loader" ] []
+
+        Failure ->
+            div [ class "ui negative message" ]
+                [ i [ class "exclamation circle icon" ] [] ]
+
+        Committing a ->
+            div [ class "ui active inverted dimmer" ]
+                [ div [ class "ui text loader" ] []
+                , f a
                 ]
-                [ div [ class "content" ]
-                    [ div [ class "center aligned header" ]
-                        [ i [ class "plus icon", style "margin" "20px" ] [] ]
-                    , div [ class "center aligned header" ]
-                        [ text "Add Project" ]
-                    ]
+
+        UpToDate a ->
+            f a
+
+
+view : Auth -> Model -> Data -> Accessor (Html Msg)
+view auth model data =
+    flip Access.map
+        (Access.doc data.users auth.uid
+            |> Access.map .projects
+            |> Access.for Access.get_
+        )
+    <|
+        -- Access.just <| flip identity [] <|
+        \projects ->
+            div []
+                [ div [ class "ui cards", style "margin" "20px" ] <|
+                    List.append
+                        (flip List.map
+                            projects
+                            (\rp ->
+                                a
+                                    [ class "ui card centered"
+                                    ]
+                                    [ div [ class "content" ]
+                                        [ remote rp <|
+                                            \(User.Project project) ->
+                                                div
+                                                    [ class
+                                                        "center aligned header"
+                                                    ]
+                                                    [ text project.name ]
+                                        ]
+                                    ]
+                            )
+                        )
+                        [ a
+                            [ class "ui card centered"
+                            , onClick ShowModal
+                            ]
+                            [ div [ class "content" ]
+                                [ div [ class "center aligned header" ]
+                                    [ i
+                                        [ class "plus icon"
+                                        , style "margin" "20px"
+                                        ]
+                                        []
+                                    ]
+                                , div [ class "center aligned header" ]
+                                    [ text "Add Project" ]
+                                ]
+                            ]
+                        ]
+                , searchModal auth data model
                 ]
-                :: []
-        , searchModal auth data model
-        ]
 
 
 searchModal : Auth -> Data -> Model -> Html Msg

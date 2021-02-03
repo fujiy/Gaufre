@@ -1,15 +1,17 @@
 module Firestore exposing (..)
 
 import Array
+import Firestore.Access as Access
 import Firestore.Decode as Decode exposing (Decoder)
 import Firestore.Encode as Encode exposing (Encoder)
 import Firestore.Internal as Internal exposing (..)
+import Firestore.Types as Types exposing (..)
 import Firestore.Update as Update
 import Json.Decode as Json
 
 
 type alias Id =
-    String
+    Types.Id
 
 
 type alias Firestore r =
@@ -28,6 +30,11 @@ type alias Reference r =
     Internal.Reference r
 
 
+
+-- type alias Remote =
+--     Internal.Remote(..)
+
+
 type alias WatcherPort msg =
     (Json.Value -> msg) -> Sub msg
 
@@ -39,7 +46,8 @@ type alias UpdaterPort msg =
 ref : List Id -> Reference r
 ref path =
     Internal.Reference <|
-        Internal.Document { path = Array.fromList path, data = Loading }
+        \_ ->
+            Internal.Document { path = Array.fromList path, data = Loading }
 
 
 init : Decoder (Firestore r) -> Firestore r
@@ -56,9 +64,10 @@ update :
     UpdaterPort msg
     -> Encoder (Firestore r)
     -> Updater (Firestore r)
+    -> (r -> Accessor a)
     -> Firestore r
-    -> ( Firestore r, Cmd msg )
-update p enc upd (Firestore r) =
+    -> ( Firestore r, Maybe a, Cmd msg )
+update p enc upd use (Firestore r) =
     let
         upds =
             runUpdater upd <| Firestore r
@@ -68,16 +77,23 @@ update p enc upd (Firestore r) =
 
         newfs =
             Firestore { new | laters = Update.both upds.laters new.laters }
+
+        (Accessor paths ma) =
+            use new.data
+
+        upds_ =
+            { upds | requests = Array.append paths upds.requests }
     in
-    ( newfs, p <| unValue <| Encode.updates enc upds )
+    ( newfs, ma, p <| unValue <| Encode.updates enc upds_ )
 
 
 digest :
     UpdaterPort msg
     -> Encoder (Firestore r)
+    -> (r -> Accessor a)
     -> Firestore r
-    -> ( Firestore r, Cmd msg )
-digest p enc (Firestore r) =
+    -> ( Firestore r, Maybe a, Cmd msg )
+digest p enc use (Firestore r) =
     let
         upds =
             runUpdater r.laters <| Firestore r
@@ -87,8 +103,14 @@ digest p enc (Firestore r) =
 
         newfs =
             Firestore { new | laters = upds.laters }
+
+        (Accessor paths ma) =
+            use new.data
+
+        upds_ =
+            { upds | requests = Array.append paths upds.requests }
     in
-    ( newfs, p <| unValue <| Encode.updates enc upds )
+    ( newfs, ma, p <| unValue <| Encode.updates enc upds_ )
 
 
 watch :

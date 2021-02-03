@@ -2,71 +2,9 @@ module Firestore.Internal exposing (..)
 
 import Array exposing (Array)
 import Dict exposing (Dict)
+import Firestore.Types exposing (..)
 import Json.Encode as JE
 import List
-
-
-type alias Id =
-    String
-
-
-type alias Path =
-    Array Id
-
-
-type Remote a
-    = Loading
-    | Failure
-    | Committing a
-    | UpToDate a
-
-
-mapRemote : (a -> b) -> Remote a -> Remote b
-mapRemote f r =
-    case r of
-        Loading ->
-            Loading
-
-        Failure ->
-            Failure
-
-        Committing a ->
-            Committing (f a)
-
-        UpToDate a ->
-            UpToDate (f a)
-
-
-appRemote : Remote (a -> b) -> Remote a -> Remote b
-appRemote rf ra =
-    case ( rf, ra ) of
-        ( Failure, _ ) ->
-            Failure
-
-        ( _, Failure ) ->
-            Failure
-
-        ( Loading, _ ) ->
-            Loading
-
-        ( _, Loading ) ->
-            Loading
-
-        ( Committing f, Committing a ) ->
-            Committing (f a)
-
-        ( Committing f, UpToDate a ) ->
-            Committing (f a)
-
-        ( UpToDate f, Committing a ) ->
-            Committing (f a)
-
-        ( UpToDate f, UpToDate a ) ->
-            UpToDate (f a)
-
-
-type alias IsLoading =
-    Bool
 
 
 type Firestore r
@@ -91,7 +29,7 @@ type Document r
 
 
 type Reference r
-    = Reference (Document r)
+    = Reference (() -> Document r)
 
 
 type Value a
@@ -100,6 +38,10 @@ type Value a
 
 type Updater a
     = Updater (a -> Updates a)
+
+
+type Accessor a
+    = Accessor (Array Path) (Maybe a)
 
 
 type alias Updates a =
@@ -141,16 +83,6 @@ noUpdater =
     Updater noUpdates
 
 
-root : Path
-root =
-    Array.empty
-
-
-topLevel : Id -> Path
-topLevel id =
-    Array.fromList [ id ]
-
-
 fromJson : JE.Value -> Value a
 fromJson =
     Value
@@ -159,11 +91,6 @@ fromJson =
 unValue : Value a -> JE.Value
 unValue (Value v) =
     v
-
-
-sub : Path -> Id -> Path
-sub path id =
-    Array.push id path
 
 
 loadingDocument : Path -> Document r
@@ -176,40 +103,33 @@ noDocument path =
     Document { path = path, data = Failure }
 
 
-type Refs
-    = Root
-    | Sub (Dict Id Refs)
 
-
-emptyRefs : Refs
-emptyRefs =
-    Sub Dict.empty
-
-
-subRef : Id -> Refs -> Refs
-subRef id refs =
-    Sub <| Dict.singleton id refs
-
-
-mergeRefs : List Refs -> Refs
-mergeRefs =
-    let
-        merge x y =
-            case ( x, y ) of
-                ( Root, _ ) ->
-                    Root
-
-                ( _, Root ) ->
-                    Root
-
-                ( Sub dx, Sub dy ) ->
-                    Sub <|
-                        Dict.merge
-                            Dict.insert
-                            (\id a b -> Dict.insert id <| merge a b)
-                            Dict.insert
-                            dx
-                            dy
-                            Dict.empty
-    in
-    List.foldr merge emptyRefs
+-- type Refs
+--     = Root
+--     | Sub (Dict Id Refs)
+-- emptyRefs : Refs
+-- emptyRefs =
+--     Sub Dict.empty
+-- subRef : Id -> Refs -> Refs
+-- subRef id refs =
+--     Sub <| Dict.singleton id refs
+-- mergeRefs : List Refs -> Refs
+-- mergeRefs =
+--     let
+--         merge x y =
+--             case ( x, y ) of
+--                 ( Root, _ ) ->
+--                     Root
+--                 ( _, Root ) ->
+--                     Root
+--                 ( Sub dx, Sub dy ) ->
+--                     Sub <|
+--                         Dict.merge
+--                             Dict.insert
+--                             (\id a b -> Dict.insert id <| merge a b)
+--                             Dict.insert
+--                             dx
+--                             dy
+--                             Dict.empty
+--     in
+--     List.foldr merge emptyRefs

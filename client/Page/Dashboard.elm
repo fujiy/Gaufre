@@ -2,7 +2,6 @@ module Page.Dashboard exposing (..)
 
 import Data exposing (Auth, Data)
 import Firestore exposing (Firestore)
-import Firestore.Html as FS
 import Html exposing (Html, a, div, i, span, text)
 import Html.Attributes as Html exposing (class, href)
 import Html.Events exposing (onClick)
@@ -15,9 +14,7 @@ type Msg
     = SignOut
 
 
-view : Auth -> Firestore Data -> Html Msg
-view auth =
-    flip FS.firestore <|
-        \data ->
-            div []
-                []
+view : Auth -> Data -> Html Msg
+view auth data =
+    div []
+        []

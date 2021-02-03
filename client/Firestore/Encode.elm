@@ -3,6 +3,7 @@ module Firestore.Encode exposing (..)
 import Array exposing (Array)
 import Dict exposing (Dict)
 import Firestore.Internal as Internal exposing (..)
+import Firestore.Types exposing (..)
 import Json.Encode as Json
 import Maybe.Extra as Maybe
 import Util exposing (..)
@@ -87,8 +88,31 @@ field name getter enc =
 
 
 reference : Encoder (Document r) -> Encoder (Reference r)
-reference f (Reference d) =
-    f d |> coerce
+reference f (Reference ld) =
+    let
+        (Document d) =
+            ld ()
+
+        status =
+            case d.data of
+                Loading ->
+                    "loading"
+
+                Failure ->
+                    "failure"
+
+                Committing _ ->
+                    "committing"
+
+                UpToDate _ ->
+                    "uptodate"
+    in
+    Value <|
+        Json.object
+            [ ( "path", unValue <| path d.path )
+            , ( "status", Json.string status )
+            , ( "__doc__", Json.bool True )
+            ]
 
 
 path : Encoder Path

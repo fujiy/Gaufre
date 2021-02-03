@@ -1,8 +1,9 @@
 module Page exposing (..)
 
+import Browser exposing (Document)
 import Data exposing (Auth, Data)
 import Firestore exposing (Firestore)
-import Firestore.Html as FS
+import Firestore.Access as Access exposing (Accessor)
 import Firestore.Update as Update exposing (Updater)
 import Html exposing (Attribute, Html, a, div, i, map, span, text)
 import Html.Attributes as Html exposing (class)
@@ -41,23 +42,21 @@ update auth msg page =
             ( page, Update.none, Cmd.none )
 
 
-view : Auth -> Firestore Data -> Page -> Html Msg
-view auth fs page =
-    FS.firestore fs <|
-        \data ->
+view : Auth -> Page -> Data -> Accessor (Document Msg)
+view auth page data =
+    Access.map (Document "Gaufre") <|
+        Access.list <|
             case page of
                 Projects model ->
-                    div []
-                        [ menubar auth data page
-                        , map ProjectsMsg <| Projects.view auth data model
-                        ]
+                    [ menubar auth data page
+                    , Access.map (map ProjectsMsg) <| Projects.view auth model data
+                    ]
 
                 Dashboard ->
-                    div []
-                        [ menubar auth data page ]
+                    [ menubar auth data page ]
 
 
-menubar : Auth -> Data -> Page -> Html Msg
+menubar : Auth -> Data -> Page -> Accessor (Html Msg)
 menubar auth data page =
     let
         pg_ =
@@ -71,28 +70,27 @@ menubar auth data page =
                 Dashboard ->
                     { pg_ | dashboard = True }
     in
-    div []
-        [ div [ class "ui secondary pointing menu" ]
-            [ div [ class "header item" ] [ text "Gaufre" ]
-            , a
-                [ class "item", classIf pg.projects "active" ]
-                [ text "Projects" ]
-            , a [ class "item", classIf pg.dashboard "active" ]
-                [ text "Dashboard" ]
-            , a [ class "item" ] [ text "Direct" ]
-            , a [ class "item" ] [ text "Manage" ]
-            , a [ class "item" ] [ text "Create" ]
-            , div [ class "right menu" ]
-                [ a
-                    [ class "item"
-                    , onClick SignOut
+    flip Access.map (Access.doc data.users auth.uid) <|
+        \user ->
+            div []
+                [ div [ class "ui secondary pointing menu" ]
+                    [ a
+                        [ class "item", classIf pg.projects "active" ]
+                        [ text "Projects" ]
+                    , a [ class "item", classIf pg.dashboard "active" ]
+                        [ text "Dashboard" ]
+                    , a [ class "item" ] [ text "Direct" ]
+                    , a [ class "item" ] [ text "Manage" ]
+                    , a [ class "item" ] [ text "Create" ]
+                    , div [ class "right menu" ]
+                        [ a
+                            [ class "item"
+                            , onClick SignOut
+                            ]
+                            [ text user.name ]
+                        ]
                     ]
-                    [ FS.doc data.users auth.uid <|
-                        \user -> text user.name
-                    ]
-                ]
-            ]
 
-        -- , div [ class "ui fluid popup bottom right transition hidden" ]
-        --     [ Button.primary SignOut "Sign Out" ]
-        ]
+                -- , div [ class "ui fluid popup bottom right transition hidden" ]
+                --     [ Button.primary SignOut "Sign Out" ]
+                ]
