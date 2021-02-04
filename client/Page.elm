@@ -1,6 +1,6 @@
 module Page exposing (..)
 
-import Browser exposing (Document)
+import Browser
 import Data exposing (Auth, Data)
 import Firestore exposing (Firestore)
 import Firestore.Access as Access exposing (Accessor)
@@ -42,9 +42,9 @@ update auth msg page =
             ( page, Update.none, Cmd.none )
 
 
-view : Auth -> Page -> Data -> Accessor (Document Msg)
+view : Auth -> Page -> Data -> Accessor (Browser.Document Msg)
 view auth page data =
-    Access.map (Document "Gaufre") <|
+    Access.map (Browser.Document <| Debug.toString page ) <|
         Access.list <|
             case page of
                 Projects model ->

@@ -135,7 +135,7 @@ update msg model =
                                         updatePort
                                         Data.encode
                                         upd
-                                        (pageView r.auth r.page)
+                                        (pageView r.auth page)
                                         r.firestore
                             in
                             ( SignedIn
@@ -144,7 +144,7 @@ update msg model =
                                     , firestore = fs
                                     , view = Maybe.withDefault r.view mview
                                 }
-                            , Cmd.batch [ Cmd.map Page cmd, updcmd ]
+                            , Cmd.batch [ updcmd, Cmd.map Page cmd]
                             )
 
                 _ ->
