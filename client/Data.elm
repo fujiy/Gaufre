@@ -1,5 +1,7 @@
 module Data exposing (..)
 
+import Array
+import Browser.Navigation as Nav
 import Data.Client as Client exposing (Client)
 import Data.Project as Project exposing (Project)
 import Data.User as User exposing (User)
@@ -61,5 +63,5 @@ initClient auth =
             [ Update.collection usersLens <|
                 Update.doc auth.uid <|
                     Update.default User.encode
-                        { name = auth.name, projects = [] }
+                        { name = auth.name, projects = Array.empty }
             ]

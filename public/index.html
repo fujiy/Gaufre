@@ -24,9 +24,9 @@
 
     <script defer src="/__/firebase/init.js?useEmulator=true"></script>
 
-    <script defer src="main.js"></script>
-    <script defer src="firestore.js"></script>
-    <script defer src="semantic-ui.js"></script>
+    <script defer src="/main.js"></script>
+    <script defer src="/firestore.js"></script>
+    <script defer src="/semantic-ui.js"></script>
 
     <script src="https://apis.google.com/js/platform.js?onload=init" async defer></script>
     <link
@@ -107,6 +107,8 @@
            /* app.ports.setLocalStorage.subscribe(req => {
             *     localStorage.setItem(req[0], req[1]);
             * }) */
+           app.ports.newTab.subscribe(url => {window.open(url, '_blank')})
+
            app.ports.signIn.subscribe(_ => {
                googleAuth.signIn().then(user => {
                    if (user.isSignedIn()) signedIn(user)

@@ -60,6 +60,16 @@ init (Decode.Decoder dec) =
             fs
 
 
+render :
+    UpdaterPort msg
+    -> Encoder (Firestore r)
+    -> (r -> Accessor a)
+    -> Firestore r
+    -> ( Firestore r, Maybe a, Cmd msg )
+render p enc =
+    update p enc Update.none
+
+
 update :
     UpdaterPort msg
     -> Encoder (Firestore r)

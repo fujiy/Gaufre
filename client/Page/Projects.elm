@@ -1,15 +1,18 @@
 module Page.Projects exposing (..)
 
+import Array
+import Array.Extra as Array
+import Browser.Navigation as Nav
 import Data exposing (Auth, Data)
 import Data.Project as Project
-import Data.User as User
+import Data.User as User exposing (Project, User)
 import Firestore
 import Firestore.Access as Access exposing (Accessor)
 import Firestore.Types exposing (Remote(..))
 import Firestore.Update as Update exposing (Updater)
 import GDrive
 import Html exposing (Html, a, div, i, input, node, span, text)
-import Html.Attributes as Html exposing (attribute, class, placeholder, style, type_)
+import Html.Attributes exposing (attribute, class, href, placeholder, style, type_)
 import Html.Events exposing (on, onClick, onInput)
 import Json.Decode as Decode
 import Util exposing (..)
@@ -30,6 +33,11 @@ type Msg
     | Search String
     | SearchResult (List GDrive.FileMeta)
     | AddProject GDrive.FileMeta
+
+
+init : Model
+init =
+    List
 
 
 update : Auth -> Msg -> Model -> ( Model, Updater Data, Cmd Msg )
@@ -111,7 +119,7 @@ update auth msg model =
                             \user ->
                                 { user
                                     | projects =
-                                        List.append user.projects [ projectRef ]
+                                        Array.push projectRef user.projects
                                 }
                 , Update.collection Data.projectsLens <|
                     Update.doc file.id <|
@@ -159,12 +167,12 @@ remote r f =
             f a
 
 
-view : Auth -> Model -> Data -> Accessor (Html Msg)
-view auth model data =
+view : Auth -> Model -> Data -> User -> Accessor (Html Msg)
+view auth model data user =
     flip Access.map
-        (Access.doc data.users auth.uid
-            |> Access.map .projects
-            |> Access.for Access.get_
+        (Array.mapToList Access.get_ user.projects
+            |> Access.list
+            |> Access.map (List.indexedMap Tuple.pair)
         )
     <|
         -- Access.just <| flip identity [] <|
@@ -174,9 +182,10 @@ view auth model data =
                     List.append
                         (flip List.map
                             projects
-                            (\rp ->
+                            (\( i, rp ) ->
                                 a
                                     [ class "ui card centered"
+                                    , href <| "/" ++ String.fromInt i
                                     ]
                                     [ div [ class "content" ]
                                         [ remote rp <|
@@ -228,7 +237,7 @@ searchModal auth data model =
         , on "hide" <| Decode.succeed HideModal
         ]
         [ div [ class "header" ]
-            [ text "Select a project folder in your Google Drive" ]
+            [ text "Google Drive内のフォルダからプロジェクトフォルダを選択" ]
         , case model of
             SearchFolder { result, loading } ->
                 div [ class "content" ]

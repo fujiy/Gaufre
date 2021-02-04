@@ -36,23 +36,31 @@ port watcherPort : Firestore.WatcherPort msg
 port updatePort : Firestore.UpdaterPort msg
 
 
+port newTab : String -> Cmd msg
+
+
 
 -- Model -----------------------------------------------------------------------
 
 
 type Model
     = NotSignedIn
+        { navKey : Nav.Key
+        , url : Url
+        }
     | SignedIn
         { auth : Data.Auth
-        , page : Page.Page
+        , page : Page.Model
         , firestore : Firestore Data.Data
         , view : Document Msg
+        , navKey : Nav.Key
+        , url : Url
         }
 
 
 init : () -> Url -> Nav.Key -> ( Model, Cmd Msg )
 init flags origin navKey =
-    ( NotSignedIn, Cmd.none )
+    ( NotSignedIn { navKey = navKey, url = origin }, Cmd.none )
 
 
 
@@ -60,8 +68,8 @@ init flags origin navKey =
 
 
 type Msg
-    = ChangedUrl Url
-    | ClickedLink Browser.UrlRequest
+    = UrlChanged Url
+    | LinkClicked Browser.UrlRequest
     | SignIn
     | SignOut
     | Authorized Auth
@@ -72,7 +80,7 @@ type Msg
 update : Msg -> Model -> ( Model, Cmd Msg )
 update msg model =
     case model of
-        NotSignedIn ->
+        NotSignedIn { navKey, url } ->
             case msg of
                 SignIn ->
                     ( model, signIn () )
@@ -84,14 +92,16 @@ update msg model =
                                 updatePort
                                 Data.encode
                                 (Data.initClient auth)
-                                (pageView auth Page.init)
+                                (pageView auth <| Page.init url)
                                 (Firestore.init Data.decode)
                     in
                     ( SignedIn
                         { auth = auth
-                        , page = Page.init
+                        , page = Page.init url
                         , firestore = firestore
                         , view = Maybe.withDefault (Document "Gaufre" []) mview
+                        , navKey = navKey
+                        , url = url
                         }
                     , cmd
                     )
@@ -102,7 +112,9 @@ update msg model =
         SignedIn r ->
             case msg of
                 SignOut ->
-                    ( NotSignedIn, signOut () )
+                    ( NotSignedIn { navKey = r.navKey, url = r.url }
+                    , signOut ()
+                    )
 
                 FirestoreUpdate firestore ->
                     let
@@ -123,7 +135,9 @@ update msg model =
                 Page m ->
                     case m of
                         Page.SignOut ->
-                            ( NotSignedIn, signOut () )
+                            ( NotSignedIn { navKey = r.navKey, url = r.url }
+                            , signOut ()
+                            )
 
                         _ ->
                             let
@@ -144,8 +158,41 @@ update msg model =
                                     , firestore = fs
                                     , view = Maybe.withDefault r.view mview
                                 }
-                            , Cmd.batch [ updcmd, Cmd.map Page cmd]
+                            , Cmd.batch [ updcmd, Cmd.map Page cmd ]
                             )
+
+                LinkClicked urlRequest ->
+                    case urlRequest of
+                        Browser.Internal url ->
+                            ( model, Nav.pushUrl r.navKey (Url.toString url) )
+
+                        Browser.External "" ->
+                            ( model, Cmd.none )
+
+                        Browser.External href ->
+                            ( model, newTab href )
+
+                UrlChanged url ->
+                    let
+                        page =
+                            Page.urlChanged r.page url
+
+                        ( fs, mview, cmd ) =
+                            Firestore.render
+                                updatePort
+                                Data.encode
+                                (pageView r.auth page)
+                                r.firestore
+                    in
+                    ( SignedIn
+                        { r
+                            | page = page
+                            , firestore = fs
+                            , view = Maybe.withDefault r.view mview
+                            , url = url
+                        }
+                    , cmd
+                    )
 
                 _ ->
                     ( model, Cmd.none )
@@ -177,7 +224,7 @@ endpoint =
 appView : Model -> Document Msg
 appView model =
     case model of
-        NotSignedIn ->
+        NotSignedIn _ ->
             { title = "Gaufre"
             , body = [ Html.map (always SignIn) Entrance.view ]
             }
@@ -186,7 +233,7 @@ appView model =
             view
 
 
-pageView : Auth -> Page.Page -> Data -> Access.Accessor (Document Msg)
+pageView : Auth -> Page.Model -> Data -> Access.Accessor (Document Msg)
 pageView auth page data =
     Access.map
         (\{ title, body } ->
@@ -203,7 +250,7 @@ pageView auth page data =
 subscriptions : Model -> Sub Msg
 subscriptions model =
     case model of
-        NotSignedIn ->
+        NotSignedIn _ ->
             authorized Authorized
 
         SignedIn { firestore } ->
@@ -222,6 +269,6 @@ main =
         , view = appView
         , update = update
         , subscriptions = subscriptions
-        , onUrlRequest = ClickedLink
-        , onUrlChange = ChangedUrl
+        , onUrlRequest = LinkClicked
+        , onUrlChange = UrlChanged
         }

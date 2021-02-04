@@ -1,5 +1,6 @@
 module Data.User exposing (..)
 
+import Array exposing (Array)
 import Firestore exposing (..)
 import Firestore.Decode as Decode
 import Firestore.Encode as Encode
@@ -8,7 +9,7 @@ import GDrive
 
 type alias User =
     { name : String
-    , projects : List (Reference Project)
+    , projects : Array (Reference Project)
     }
 
 
@@ -27,7 +28,7 @@ encode =
     Encode.document
         [ Encode.field "name" .name Encode.string
         , Encode.field "projects" .projects <|
-            Encode.list <|
+            Encode.array <|
                 Encode.reference encodeProject
         ]
 
@@ -37,7 +38,7 @@ decode =
     Decode.document User
         |> Decode.field "name" Decode.string
         |> Decode.field "projects"
-            (Decode.list <| Decode.reference decodeProject)
+            (Decode.array <| Decode.reference decodeProject)
 
 
 encodeProject : Encode.Encoder (Document Project)

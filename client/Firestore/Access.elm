@@ -4,6 +4,7 @@ import Array exposing (Array)
 import Dict
 import Firestore.Internal as Internal exposing (..)
 import Firestore.Types exposing (..)
+import Maybe.Extra as Maybe
 import Util exposing (..)
 
 
@@ -46,9 +47,24 @@ andThen f (Accessor paths ma) =
             requires paths <| f a
 
 
+andThen2 : (a -> b -> Accessor c) -> Accessor a -> Accessor b -> Accessor c
+andThen2 f (Accessor pas ma) (Accessor pbs mb) =
+    let
+        paths =
+            Array.append pas pbs
+    in
+    Maybe.map2 f ma mb
+        |> Maybe.unwrap (Accessor paths Nothing) (requires paths)
+
+
 for : (a -> Accessor b) -> Accessor (List a) -> Accessor (List b)
 for f ac =
     map (List.map f >> list) ac |> andThen identity
+
+
+forArray : (a -> Accessor b) -> Accessor (Array a) -> Accessor (Array b)
+forArray f ac =
+    map (Array.map f >> array) ac |> andThen identity
 
 
 list : List (Accessor a) -> Accessor (List a)
@@ -56,9 +72,24 @@ list =
     List.foldr (map2 (::)) (just [])
 
 
-maybe : Accessor a -> Accessor (Maybe a)
-maybe (Accessor paths ma) =
-    Accessor paths <| Just ma
+array : Array (Accessor a) -> Accessor (Array a)
+array =
+    Array.toList >> list >> map Array.fromList
+
+
+maybe : Maybe (Accessor a) -> Accessor (Maybe a)
+maybe m =
+    case m of
+        Nothing ->
+            just Nothing
+
+        Just (Accessor paths ma) ->
+            Accessor paths <| Just ma
+
+
+fromJust : Accessor (Maybe a) -> Accessor a
+fromJust (Accessor paths mma) =
+    Accessor paths <| Maybe.andThen identity mma
 
 
 doc : Collection r -> Id -> Accessor r
