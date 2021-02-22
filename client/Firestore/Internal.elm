@@ -2,105 +2,114 @@ module Firestore.Internal exposing (..)
 
 import Array exposing (Array)
 import Dict exposing (Dict)
-import Firestore.Types exposing (..)
-import Json.Encode as JE
+import Firestore.Path as Path exposing (Id, Path, PathMap, Paths)
+import Firestore.Remote as Remote exposing (Remote(..))
+import GDrive exposing (request)
+import Json.Decode as Decode exposing (Decoder)
+import Json.Encode exposing (Value)
 import List
 
 
-type Firestore r
-    = Firestore
-        { data : r
-        , laters : Updater (Firestore r)
-        }
+type Collections r
+    = Collections r
 
 
-type Collection r
-    = Collection
-        { path : Path
-        , documents : Dict Id (Document r)
-        }
+type Collection s r
+    = Collection Id (Dict Id (Document s r))
 
 
-type Document r
-    = Document
-        { path : Path
-        , data : Remote r
-        }
+type Document s r
+    = Document s (Remote r)
 
 
-type Reference r
-    = Reference (() -> Document r)
+type Reference d a
+    = Reference (Lens d a)
 
 
-type Value a
-    = Value JE.Value
+type Lens a b
+    = Lens (a -> Accessor a b) (Update -> b -> Updater a)
+
+
+type Accessor r a
+    = Accessor Paths (Remote a)
 
 
 type Updater a
     = Updater (a -> Updates a)
 
 
-type Accessor a
-    = Accessor (Array Path) (Maybe a)
-
-
 type alias Updates a =
     { value : a
-    , documents : Array ( Path, DocumentUpdates )
-    , collections : Array ( Path, CollectionUpdates )
-    , laters : Updater a
-    , requests : Array Path
+    , updates : PathMap Update
+    , requests : Paths
+    , afterwards : Updater a
     }
 
 
-type DocumentUpdates
-    = Whole (Value ())
-    | Field String (Value ())
+type Update
+    = Set Value
+    | Add Value
     | Delete
 
 
-type CollectionUpdates
-    = Add (Value ())
+runUpdater (Updater f) =
+    f
 
 
-mapDocument : (a -> b) -> Document a -> Document b
-mapDocument f (Document { path, data }) =
-    Document { path = path, data = mapRemote f data }
+type alias Command =
+    { listen : Paths
+    , unlisten : Paths
+    , updates : PathMap Update
+    }
+
+
+type alias Subscription =
+    { updates : PathMap Update }
+
+
+coerce : Accessor r a -> Accessor s a
+coerce (Accessor path ra) =
+    Accessor path ra
+
+
+
+-- type DocumentUpdates
+--     = Whole Value
+--     | Field String Value
+--     | Delete
+-- type CollectionUpdates
+--     = Add Value
+
+
+mergeUpdate : Update -> Update -> Update
+mergeUpdate u _ =
+    u
+
+
+
+-- mapDocument : (a -> b) -> Document s a -> Document s b
+-- mapDocument f (Document s rd) =
+--     Document s <| Remote.map f rd
 
 
 noUpdates : a -> Updates a
 noUpdates a =
-    Updates a Array.empty Array.empty noUpdater Array.empty
+    { value = a
+    , updates = Path.empty
+    , requests = Path.empty
+    , afterwards = noUpdater
+    }
 
 
-runUpdater : Updater a -> a -> Updates a
-runUpdater (Updater f) =
-    f
+
+-- runUpdater : Updater a -> a -> Updates a
+-- runUpdater (Updater f) =
+--     f
 
 
 noUpdater : Updater a
 noUpdater =
     Updater noUpdates
-
-
-fromJson : JE.Value -> Value a
-fromJson =
-    Value
-
-
-unValue : Value a -> JE.Value
-unValue (Value v) =
-    v
-
-
-loadingDocument : Path -> Document r
-loadingDocument path =
-    Document { path = path, data = Loading }
-
-
-noDocument : Path -> Document r
-noDocument path =
-    Document { path = path, data = Failure }
 
 
 

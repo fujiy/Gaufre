@@ -1,6 +1,7 @@
 module Util exposing (..)
 
 import Array exposing (Array)
+import Array.Extra as Array
 import Html exposing (Attribute)
 import Html.Attributes exposing (attribute, class)
 
@@ -31,6 +32,17 @@ orWith f mx my =
 singleton : a -> Array a
 singleton a =
     Array.fromList [ a ]
+
+
+uncons : Array a -> Maybe ( a, Array a )
+uncons arr =
+    let
+        ( ls, rs ) =
+            Array.splitAt 1 arr
+    in
+    Array.get 0 ls
+        |> Maybe.map
+            (\a -> ( a, rs ))
 
 
 boolAttr : String -> Bool -> Attribute msg

@@ -3,171 +3,211 @@ module Firestore.Access exposing (..)
 import Array exposing (Array)
 import Dict
 import Firestore.Internal as Internal exposing (..)
-import Firestore.Types exposing (..)
+import Firestore.Path as Path exposing (Id, Path, Paths)
+import Firestore.Remote as Remote exposing (Remote(..))
 import Maybe.Extra as Maybe
 import Util exposing (..)
 
 
-type alias Accessor r =
-    Internal.Accessor r
+type alias Accessor r a =
+    Internal.Accessor r a
 
 
-just : a -> Accessor a
-just a =
-    Accessor Array.empty (Just a)
+success : a -> Accessor r a
+success a =
+    Accessor Path.empty (UpToDate a)
 
 
-nothing : Accessor a
-nothing =
-    Accessor Array.empty Nothing
+failure : Accessor r a
+failure =
+    Accessor Path.empty Failure
 
 
-map : (a -> b) -> Accessor a -> Accessor b
-map f (Accessor paths ma) =
-    Accessor paths <| Maybe.map f ma
+map : (a -> b) -> Accessor r a -> Accessor r b
+map f (Accessor paths ra) =
+    Accessor paths <| Remote.map f ra
 
 
-map2 : (a -> b -> c) -> Accessor a -> Accessor b -> Accessor c
-map2 f (Accessor aps ma) (Accessor bps mb) =
-    Accessor (Array.append aps bps) <| Maybe.map2 f ma mb
+map2 : (a -> b -> c) -> Accessor r a -> Accessor r b -> Accessor r c
+map2 f (Accessor aps ra) (Accessor bps rb) =
+    Accessor (Path.append aps bps) <| Remote.map2 f ra rb
 
 
-map3 : (a -> b -> c -> d) -> Accessor a -> Accessor b -> Accessor c -> Accessor d
-map3 f (Accessor aps ma) (Accessor bps mb) (Accessor cps mc) =
-    Accessor (Array.append aps <| Array.append bps cps) <| Maybe.map3 f ma mb mc
+map3 :
+    (a -> b -> c -> d)
+    -> Accessor r a
+    -> Accessor r b
+    -> Accessor r c
+    -> Accessor r d
+map3 f (Accessor aps ra) (Accessor bps rb) (Accessor cps rc) =
+    Accessor (Path.append aps <| Path.append bps cps) <| Remote.map3 f ra rb rc
 
 
-andThen : (a -> Accessor b) -> Accessor a -> Accessor b
-andThen f (Accessor paths ma) =
-    case ma of
-        Nothing ->
-            Accessor paths Nothing
-
-        Just a ->
-            requires paths <| f a
+mapRemote : (Remote a -> Remote b) -> Accessor r a -> Accessor r b
+mapRemote f (Accessor paths ra) =
+    Accessor paths <| f ra
 
 
-andThen2 : (a -> b -> Accessor c) -> Accessor a -> Accessor b -> Accessor c
-andThen2 f (Accessor pas ma) (Accessor pbs mb) =
+unremote : Remote (Accessor r a) -> Accessor r a
+unremote ra =
+    case ra of
+        Failure ->
+            failure
+
+        Loading ->
+            Accessor Path.empty Loading
+
+        Committing (Accessor paths (UpToDate a)) ->
+            Accessor paths (Committing a)
+
+        Committing aa ->
+            aa
+
+        UpToDate aa ->
+            aa
+
+
+remote : Accessor r a -> Remote (Accessor r a)
+remote (Accessor paths ra) =
+    case ra of
+        Failure ->
+            Failure
+
+        Loading ->
+            Loading
+
+        Committing a ->
+            Committing <| Accessor paths <| UpToDate a
+
+        UpToDate a ->
+            UpToDate <| Accessor paths <| UpToDate a
+
+
+andThen : (a -> Accessor r b) -> Accessor r a -> Accessor r b
+andThen f (Accessor paths ra) =
+    Remote.andThen (f >> remote) ra
+        |> unremote
+        |> requires paths
+
+
+andThen2 : (a -> b -> Accessor r c) -> Accessor r a -> Accessor r b -> Accessor r c
+andThen2 f (Accessor pas ra) (Accessor pbs rb) =
     let
         paths =
-            Array.append pas pbs
+            Path.append pas pbs
     in
-    Maybe.map2 f ma mb
-        |> Maybe.unwrap (Accessor paths Nothing) (requires paths)
+    Remote.andThen2 (\a b -> f a b |> remote) ra rb
+        |> unremote
+        |> requires (Path.append pas pbs)
 
 
-for : (a -> Accessor b) -> Accessor (List a) -> Accessor (List b)
+for : (a -> Accessor r b) -> Accessor r (List a) -> Accessor r (List b)
 for f ac =
     map (List.map f >> list) ac |> andThen identity
 
 
-forArray : (a -> Accessor b) -> Accessor (Array a) -> Accessor (Array b)
+forArray : (a -> Accessor r b) -> Accessor r (Array a) -> Accessor r (Array b)
 forArray f ac =
     map (Array.map f >> array) ac |> andThen identity
 
 
-list : List (Accessor a) -> Accessor (List a)
+list : List (Accessor r a) -> Accessor r (List a)
 list =
-    List.foldr (map2 (::)) (just [])
+    List.foldr (map2 (::)) (success [])
 
 
-array : Array (Accessor a) -> Accessor (Array a)
+array : Array (Accessor r a) -> Accessor r (Array a)
 array =
     Array.toList >> list >> map Array.fromList
 
 
-maybe : Maybe (Accessor a) -> Accessor (Maybe a)
-maybe m =
-    case m of
-        Nothing ->
-            just Nothing
 
-        Just (Accessor paths ma) ->
-            Accessor paths <| Just ma
-
-
-fromJust : Accessor (Maybe a) -> Accessor a
-fromJust (Accessor paths mma) =
-    Accessor paths <| Maybe.andThen identity mma
+-- maybe : Maybe (Accessor r a) -> Accessor (Maybe a)
+-- maybe m =
+--     case m of
+--         Nothing ->
+--             failure
+--         Just (Accessor paths ra) ->
+--             Accessor paths <| UpToDate ra
 
 
-doc : Collection r -> Id -> Accessor r
-doc col id =
-    let
-        (Accessor paths mr) =
-            doc_ col id
-    in
-    Accessor paths <| Maybe.andThen toMaybe mr
+maybe : Accessor r a -> Accessor r (Maybe a)
+maybe =
+    mapRemote <| Remote.toMaybe >> UpToDate
 
 
-doc_ :
-    Collection r
-    -> Id
-    -> Accessor (Remote r)
-doc_ (Collection { path, documents }) id =
-    Accessor (singleton <| sub path id) <|
-        Just <|
-            case Dict.get id documents of
-                Nothing ->
-                    Loading
-
-                Just (Document d) ->
-                    d.data
+fromJust : Accessor r (Maybe a) -> Accessor r a
+fromJust =
+    mapRemote Remote.unmaybe
 
 
-collection : Collection r -> (List ( Id, r ) -> Accessor a) -> Accessor a
-collection col f =
-    collection_ col <|
-        List.filterMap
-            (\( id, rr ) -> toMaybe rr |> Maybe.map (Tuple.pair id))
-            >> f
+
+-- doc :
+--     Collection r
+--     -> Id
+--     -> Accessor r
+-- doc (Collection { path, documents }) id =
+--     Accessor (Array.fromList [ Path.sub path id ]) <|
+--         Just <|
+--             case Dict.get id documents of
+--                 Nothing ->
+--                     Loading
+--                 Just (Document d) ->
+--                     d.data
+-- doc x =
+--     Debug.todo "doc"
+-- collection : Collection r -> (List ( Id, r ) -> Accessor r a) -> Accessor r a
+-- collection col f =
+--     collection_ col <|
+--         List.filterMap
+--             (\( id, rr ) -> Remote.toMaybe rr |> Maybe.map (Tuple.pair id))
+--             >> f
+-- collection_ =
+--     Debug.todo "collection"
+-- collection_ :
+--     Collection r
+--     -> (List ( Id, Remote r ) -> Accessor r a)
+--     -> Accessor r a
+-- collection_ (Collection c) use =
+-- r
+-- Dict.toList c.documents
+--         |> List.filterMap
+--             (\( id, Document d ) ->
+--                 case d.data of
+--                     Failure ->
+--                         Nothing
+--                     _ ->
+--                         Just ( id, d.data )
+--             )
+--         |> use
+--         |> require c.path
 
 
-collection_ :
-    Collection r
-    -> (List ( Id, Remote r ) -> Accessor a)
-    -> Accessor a
-collection_ (Collection c) use =
-    Dict.toList c.documents
-        |> List.filterMap
-            (\( id, Document d ) ->
-                case d.data of
-                    Failure ->
-                        Nothing
-
-                    _ ->
-                        Just ( id, d.data )
-            )
-        |> use
-        |> require c.path
+access : Lens a r -> a -> Accessor a r
+access (Lens acc _) a =
+    acc a
 
 
-get : Reference r -> Accessor r
-get ref =
-    let
-        (Accessor paths mr) =
-            get_ ref
-    in
-    Accessor paths <| Maybe.andThen toMaybe mr
+
+-- let
+--     (Accessor paths rr) =
+--         acc a
+-- in
+-- Accessor paths <| Remote.andThen (\(Document r) -> r) rr
+-- get : Reference r -> Accessor r
+-- get (Reference ld) =
+--     let
+--         (Document d) =
+--             ld ()
+--     in
+--     Accessor (Path.singleton d.path ()) <| d.data
 
 
-get_ :
-    Reference r
-    -> Accessor (Remote r)
-get_ (Reference ld) =
-    let
-        (Document d) =
-            ld ()
-    in
-    Accessor (singleton d.path) <| Just d.data
+require : Path -> Accessor r a -> Accessor r a
+require path (Accessor paths ra) =
+    Accessor (Path.push path paths) ra
 
 
-require : Path -> Accessor a -> Accessor a
-require path (Accessor paths ma) =
-    Accessor (Array.push path paths) ma
-
-
-requires : Array Path -> Accessor a -> Accessor a
-requires paths_ (Accessor paths ma) =
-    Accessor (Array.append paths_ paths) ma
+requires : Paths -> Accessor r a -> Accessor r a
+requires paths_ (Accessor paths ra) =
+    Accessor (Path.append paths_ paths) ra
