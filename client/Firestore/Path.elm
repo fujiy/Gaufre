@@ -156,7 +156,10 @@ merge f (PathMap ma da) (PathMap mb db) =
             Dict.empty
 
 
-diff : PathMap a -> PathMap a -> ( PathMap a, PathMap a )
+diff :
+    PathMap a
+    -> PathMap a
+    -> ( PathMap a, PathMap a )
 diff (PathMap ma da) (PathMap mb db) =
     let
         ( dl_, dr_ ) =
@@ -184,7 +187,11 @@ diff (PathMap ma da) (PathMap mb db) =
                 db
                 ( Dict.empty, Dict.empty )
     in
-    ( PathMap ma dl_, PathMap mb dr_ )
+    if ma == mb then
+        ( PathMap Nothing dl_, PathMap Nothing dr_ )
+
+    else
+        ( PathMap ma dl_, PathMap mb dr_ )
 
 
 joinMap : PathMap a -> (a -> PathMap b) -> PathMap b
