@@ -5,6 +5,7 @@
   "main": "index.js",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
+    "emurate": "firebase emulators:start --only firestore,hosting",
     "watch": "elm-live client/Main.elm  -- --output=public/main.js --debug",
     "build": "elm make ./client/Main.elm --output=public/main.js"
   },

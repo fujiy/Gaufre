@@ -1,27 +1,33 @@
 module Data.Client exposing (..)
 
+import Array exposing (Array)
 import Data.Project as Project exposing (Project)
-import Data.User as User exposing (User)
 import Firestore exposing (..)
-import Firestore.Decode as Decode
-import Firestore.Encode as Encode
+import Firestore.Desc as Desc exposing (DocumentDesc)
+import Firestore.Lens as Lens
 
 
 type alias Client =
-    { projects : List (Reference Project) }
+    { projects : Array (Reference Project.Sub Project)
+    }
 
 
-encode : Encode.Encoder (Document Client)
-encode =
-    Encode.document
-        [ Encode.field "projects" .projects <|
-            Encode.list <|
-                Encode.reference Project.encode
-        ]
+type alias Collection =
+    Firestore.Collection () Client
 
 
-decode : Decode.Decoder (Document Client)
-decode =
-    Decode.document Client
-        |> Decode.field "projects"
-            (Decode.list <| Decode.reference Project.decode)
+type alias Document =
+    Firestore.Document () Client
+
+
+desc : DocumentDesc () Client
+desc =
+    Desc.document Client <|
+        Desc.field "projects"
+            .projects
+            (Desc.array Desc.reference)
+
+
+projects : Lens Client (Array (Reference Project.Sub Project))
+projects =
+    Lens.lens .projects (\ps c -> { c | projects = ps })

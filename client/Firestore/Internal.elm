@@ -1,13 +1,10 @@
 module Firestore.Internal exposing (..)
 
-import Array exposing (Array)
+import Array
 import Dict exposing (Dict)
 import Firestore.Path as Path exposing (Id, Path, PathMap, Paths)
-import Firestore.Remote as Remote exposing (Remote(..))
-import GDrive exposing (request)
-import Json.Decode as Decode exposing (Decoder)
+import Firestore.Remote exposing (Remote(..))
 import Json.Encode exposing (Value)
-import List
 
 
 type Collections r
@@ -15,15 +12,19 @@ type Collections r
 
 
 type Collection s r
-    = Collection Id (Dict Id (Document s r))
+    = Collection
+        { name : Id
+        , empty : s
+        , docs : Dict Id (Document s r)
+        }
 
 
 type Document s r
     = Document s (Remote r)
 
 
-type Reference d a
-    = Reference (Lens d a)
+type Reference s r
+    = Reference Path
 
 
 type Lens a b
@@ -52,19 +53,9 @@ type Update
     | Delete
 
 
+runUpdater : Updater a -> a -> Updates a
 runUpdater (Updater f) =
     f
-
-
-type alias Command =
-    { listen : Paths
-    , unlisten : Paths
-    , updates : PathMap Update
-    }
-
-
-type alias Subscription =
-    { updates : PathMap Update }
 
 
 coerce : Accessor r a -> Accessor s a
@@ -72,24 +63,9 @@ coerce (Accessor path ra) =
     Accessor path ra
 
 
-
--- type DocumentUpdates
---     = Whole Value
---     | Field String Value
---     | Delete
--- type CollectionUpdates
---     = Add Value
-
-
 mergeUpdate : Update -> Update -> Update
 mergeUpdate u _ =
     u
-
-
-
--- mapDocument : (a -> b) -> Document s a -> Document s b
--- mapDocument f (Document s rd) =
---     Document s <| Remote.map f rd
 
 
 noUpdates : a -> Updates a
@@ -110,35 +86,3 @@ noUpdates a =
 noUpdater : Updater a
 noUpdater =
     Updater noUpdates
-
-
-
--- type Refs
---     = Root
---     | Sub (Dict Id Refs)
--- emptyRefs : Refs
--- emptyRefs =
---     Sub Dict.empty
--- subRef : Id -> Refs -> Refs
--- subRef id refs =
---     Sub <| Dict.singleton id refs
--- mergeRefs : List Refs -> Refs
--- mergeRefs =
---     let
---         merge x y =
---             case ( x, y ) of
---                 ( Root, _ ) ->
---                     Root
---                 ( _, Root ) ->
---                     Root
---                 ( Sub dx, Sub dy ) ->
---                     Sub <|
---                         Dict.merge
---                             Dict.insert
---                             (\id a b -> Dict.insert id <| merge a b)
---                             Dict.insert
---                             dx
---                             dy
---                             Dict.empty
---     in
---     List.foldr merge emptyRefs

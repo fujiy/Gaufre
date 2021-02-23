@@ -1,9 +1,8 @@
 module Firestore.Access exposing (..)
 
 import Array exposing (Array)
-import Dict
 import Firestore.Internal as Internal exposing (..)
-import Firestore.Path as Path exposing (Id, Path, Paths)
+import Firestore.Path as Path exposing (Path, Paths)
 import Firestore.Remote as Remote exposing (Remote(..))
 import Maybe.Extra as Maybe
 import Util exposing (..)
@@ -67,8 +66,8 @@ unremote ra =
             aa
 
 
-remote : Accessor r a -> Remote (Accessor r a)
-remote (Accessor paths ra) =
+toRemote : Accessor r a -> Remote (Accessor r a)
+toRemote (Accessor paths ra) =
     case ra of
         Failure ->
             Failure
@@ -83,20 +82,21 @@ remote (Accessor paths ra) =
             UpToDate <| Accessor paths <| UpToDate a
 
 
+remote : Accessor r a -> Accessor r (Remote a)
+remote =
+    mapRemote UpToDate
+
+
 andThen : (a -> Accessor r b) -> Accessor r a -> Accessor r b
 andThen f (Accessor paths ra) =
-    Remote.andThen (f >> remote) ra
+    Remote.andThen (f >> toRemote) ra
         |> unremote
         |> requires paths
 
 
 andThen2 : (a -> b -> Accessor r c) -> Accessor r a -> Accessor r b -> Accessor r c
 andThen2 f (Accessor pas ra) (Accessor pbs rb) =
-    let
-        paths =
-            Path.append pas pbs
-    in
-    Remote.andThen2 (\a b -> f a b |> remote) ra rb
+    Remote.andThen2 (\a b -> f a b |> toRemote) ra rb
         |> unremote
         |> requires (Path.append pas pbs)
 
@@ -141,66 +141,18 @@ fromJust =
     mapRemote Remote.unmaybe
 
 
-
--- doc :
---     Collection r
---     -> Id
---     -> Accessor r
--- doc (Collection { path, documents }) id =
---     Accessor (Array.fromList [ Path.sub path id ]) <|
---         Just <|
---             case Dict.get id documents of
---                 Nothing ->
---                     Loading
---                 Just (Document d) ->
---                     d.data
--- doc x =
---     Debug.todo "doc"
--- collection : Collection r -> (List ( Id, r ) -> Accessor r a) -> Accessor r a
--- collection col f =
---     collection_ col <|
---         List.filterMap
---             (\( id, rr ) -> Remote.toMaybe rr |> Maybe.map (Tuple.pair id))
---             >> f
--- collection_ =
---     Debug.todo "collection"
--- collection_ :
---     Collection r
---     -> (List ( Id, Remote r ) -> Accessor r a)
---     -> Accessor r a
--- collection_ (Collection c) use =
--- r
--- Dict.toList c.documents
---         |> List.filterMap
---             (\( id, Document d ) ->
---                 case d.data of
---                     Failure ->
---                         Nothing
---                     _ ->
---                         Just ( id, d.data )
---             )
---         |> use
---         |> require c.path
-
-
 access : Lens a r -> a -> Accessor a r
 access (Lens acc _) a =
     acc a
 
 
-
--- let
---     (Accessor paths rr) =
---         acc a
--- in
--- Accessor paths <| Remote.andThen (\(Document r) -> r) rr
--- get : Reference r -> Accessor r
--- get (Reference ld) =
---     let
---         (Document d) =
---             ld ()
---     in
---     Accessor (Path.singleton d.path ()) <| d.data
+thenAccess : Lens a r -> Accessor d a -> Accessor d r
+thenAccess l (Accessor paths a) =
+    let
+        (Accessor paths_ b) =
+            Remote.map (access l) a |> unremote
+    in
+    Accessor (Path.joinSub paths paths_) b
 
 
 require : Path -> Accessor r a -> Accessor r a

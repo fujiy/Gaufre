@@ -4,19 +4,19 @@ import Array exposing (Array)
 import Dict
 import Firestore.Access as Access
 import Firestore.Internal exposing (..)
-import Firestore.Path as Path exposing (Id, PathMap, Paths)
+import Firestore.Path as Path exposing (Id, Path)
 import Firestore.Remote as Remote exposing (Remote(..))
 import Firestore.Update as Update
+import Html exposing (col)
 import List.Extra as List
 import Maybe.Extra as Maybe
 import Monocle.Iso as Iso exposing (Iso)
-import Util exposing (flip)
 
 
 lens : (a -> b) -> (b -> a -> a) -> Lens a b
 lens getter setter =
     Lens
-        (getter >> UpToDate >> Accessor Path.empty)
+        (getter >> UpToDate >> Accessor (Path.rootItem ()))
         (\u b ->
             Updater <|
                 \a ->
@@ -183,35 +183,89 @@ atArray i =
 -- Firestore
 
 
-doc : Id -> Lens (Collection r) (Document r)
-doc id =
+collection :
+    (r -> Collection ss sr)
+    -> (Collection ss sr -> r -> r)
+    -> Lens r (Collection ss sr)
+collection getter setter =
     Lens
-        (\(Collection name docs) ->
+        (\r ->
+            let
+                (Collection col) =
+                    getter r
+            in
             Accessor
-                (Path.singleton (Path.fromList [ name, id ]) ())
-                (Dict.get id docs
-                    |> Maybe.withDefault (Document Loading)
-                    |> UpToDate
-                )
+                (Path.singleton (Path.topLevel col.name) ())
+                (UpToDate <| Collection col)
         )
-        (\u d ->
+        (\u (Collection col) ->
             Updater <|
-                \(Collection name docs) ->
-                    { value = Collection name <| Dict.insert id d docs
-                    , updates = Path.singleton (Path.fromList [ name, id ]) u
+                \r ->
+                    { value = setter (Collection col) r
+                    , updates = Path.singleton (Path.topLevel col.name) u
                     , requests = Path.empty
                     , afterwards = noUpdater
                     }
         )
 
 
-get : Lens (Document r) r
+subCollection :
+    (s -> Collection ss sr)
+    -> (Collection ss sr -> s -> s)
+    -> Lens (Document s r) (Collection ss sr)
+subCollection getter setter =
+    Lens
+        (\(Document s _) ->
+            let
+                (Collection col) =
+                    getter s
+            in
+            Accessor
+                (Path.singleton (Path.topLevel col.name) ())
+                (UpToDate <| Collection col)
+        )
+        (\u (Collection col) ->
+            Updater <|
+                \(Document s r) ->
+                    { value = Document (setter (Collection col) s) r
+                    , updates = Path.singleton (Path.topLevel col.name) u
+                    , requests = Path.empty
+                    , afterwards = noUpdater
+                    }
+        )
+
+
+doc : Id -> Lens (Collection s r) (Document s r)
+doc id =
+    Lens
+        (\(Collection col) ->
+            Accessor
+                (Path.singleton (Path.topLevel id) ())
+                (Dict.get id col.docs
+                    |> Maybe.withDefault (Document col.empty Loading)
+                    |> UpToDate
+                )
+        )
+        (\u d ->
+            Updater <|
+                \(Collection col) ->
+                    { value =
+                        Collection
+                            { col | docs = Dict.insert id d col.docs }
+                    , updates = Path.singleton (Path.topLevel id) u
+                    , requests = Path.empty
+                    , afterwards = noUpdater
+                    }
+        )
+
+
+get : Lens (Document s r) r
 get =
-    Lens (\(Document r) -> Accessor Path.empty r)
+    Lens (\(Document _ r) -> Accessor (Path.rootItem ()) r)
         (\u r ->
             Updater <|
-                \_ ->
-                    { value = Document (UpToDate r)
+                \(Document s _) ->
+                    { value = Document s (UpToDate r)
                     , updates = Path.rootItem u
                     , requests = Path.empty
                     , afterwards = noUpdater
@@ -219,9 +273,65 @@ get =
         )
 
 
-deref : Lens (Reference r) r
-deref =
-    Debug.todo ""
+
+-- Reference
+
+
+type Dereferer d a
+    = Dereferer (List Id -> ( List Id, Lens d a ))
+
+
+sub : Lens a (Collection s r) -> Dereferer d a -> Dereferer d (Document s r)
+sub sl (Dereferer f) =
+    Dereferer <|
+        \ids ->
+            case f ids of
+                ( _ :: id :: ids_, s ) ->
+                    ( ids_, o s <| o sl <| doc id )
+
+                ( ids_, s ) ->
+                    ( ids_, o s <| fail <| Path.fromList ids_ )
+
+
+dereferer : Lens d (Collection s r) -> Dereferer d (Document s r)
+dereferer l =
+    Dereferer <|
+        \ids ->
+            case ids of
+                _ :: id :: ids_ ->
+                    ( ids_, o l <| doc id )
+
+                ids_ ->
+                    ( ids_, fail <| Path.fromList ids )
+
+
+deref : Dereferer d (Document s r) -> Reference s r -> Lens d (Document s r)
+deref (Dereferer f) (Reference path) =
+    case f <| Path.toList path of
+        ( [], l ) ->
+            l
+
+        ( ids, l ) ->
+            fail <| Path.fromList ids
+
+
+fail : Path -> Lens a b
+fail path =
+    Lens (\_ -> Accessor (Path.singleton path ()) Failure)
+        (\_ _ -> noUpdater)
+
+
+derefAndAccess :
+    Dereferer d (Document s r)
+    -> d
+    -> Reference s r
+    -> Accessor d (Document s r)
+derefAndAccess drf d r =
+    Access.access (deref drf r) d
+
+
+
+-- Iso
 
 
 list2array : Iso (List a) (Array a)

@@ -1,19 +1,15 @@
 port module Main exposing (..)
 
+-- import Firestore.Access as Access
+
 import Browser exposing (Document, application)
 import Browser.Navigation as Nav
 import Data exposing (Auth, Data)
 import Firestore as Firestore exposing (Firestore)
-import Firestore.Access as Access
-import Firestore.Decode as Decode
-import Firestore.Update as Update
+import Firestore.Access as Access exposing (Accessor)
 import GDrive
 import Html exposing (..)
-import Html.Events as Events
-import Http
-import Json.Decode as Json
 import Page
-import Page.Dashboard
 import Page.Entrance as Entrance
 import Url exposing (Url)
 
@@ -30,10 +26,10 @@ port signOut : () -> Cmd msg
 port authorized : ({ name : String, uid : String, token : String } -> msg) -> Sub msg
 
 
-port watcherPort : Firestore.WatcherPort msg
+port firestoreSubPort : Firestore.SubPort msg
 
 
-port updatePort : Firestore.UpdaterPort msg
+port firestoreCmdPort : Firestore.CmdPort msg
 
 
 port newTab : String -> Cmd msg
@@ -73,7 +69,7 @@ type Msg
     | SignIn
     | SignOut
     | Authorized Auth
-    | FirestoreUpdate (Firestore Data)
+    | Firestore (Firestore.FirestoreSub Data)
     | Page Page.Msg
 
 
@@ -89,11 +85,10 @@ update msg model =
                     let
                         ( firestore, mview, cmd ) =
                             Firestore.update
-                                updatePort
-                                Data.encode
+                                firestoreCmdPort
                                 (Data.initClient auth)
                                 (pageView auth <| Page.init url)
-                                (Firestore.init Data.decode)
+                                (Firestore.init Data.desc)
                     in
                     ( SignedIn
                         { auth = auth
@@ -116,17 +111,16 @@ update msg model =
                     , signOut ()
                     )
 
-                FirestoreUpdate firestore ->
+                Firestore sub ->
                     let
-                        ( fs, mview, cmd ) =
-                            Firestore.digest updatePort
-                                Data.encode
+                        ( firestore, mview, cmd ) =
+                            Firestore.apply firestoreCmdPort
                                 (pageView r.auth r.page)
-                                firestore
+                                sub
                     in
                     ( SignedIn
                         { r
-                            | firestore = fs
+                            | firestore = firestore
                             , view = Maybe.withDefault r.view mview
                         }
                     , cmd
@@ -146,8 +140,7 @@ update msg model =
 
                                 ( fs, mview, updcmd ) =
                                     Firestore.update
-                                        updatePort
-                                        Data.encode
+                                        firestoreCmdPort
                                         upd
                                         (pageView r.auth page)
                                         r.firestore
@@ -179,8 +172,7 @@ update msg model =
 
                         ( fs, mview, cmd ) =
                             Firestore.render
-                                updatePort
-                                Data.encode
+                                firestoreCmdPort
                                 (pageView r.auth page)
                                 r.firestore
                     in
@@ -233,7 +225,7 @@ appView model =
             view
 
 
-pageView : Auth -> Page.Model -> Data -> Access.Accessor (Document Msg)
+pageView : Auth -> Page.Model -> Data -> Accessor Data (Document Msg)
 pageView auth page data =
     Access.map
         (\{ title, body } ->
@@ -254,8 +246,8 @@ subscriptions model =
             authorized Authorized
 
         SignedIn { firestore } ->
-            Firestore.watch watcherPort Data.decode firestore
-                |> Sub.map FirestoreUpdate
+            Firestore.watch firestoreSubPort firestore
+                |> Sub.map Firestore
 
 
 

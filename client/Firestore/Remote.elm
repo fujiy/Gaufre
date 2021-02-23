@@ -63,8 +63,8 @@ map3 f ra rb =
 
 
 app : Remote (a -> b) -> Remote a -> Remote b
-app =
-    map2 identity
+app rf ra =
+    andThen (\f -> map f ra) rf
 
 
 andThen : (a -> Remote b) -> Remote a -> Remote b

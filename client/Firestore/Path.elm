@@ -4,8 +4,7 @@ import Array exposing (Array)
 import Dict exposing (Dict)
 import Dict.Extra as Dict
 import Maybe.Extra as Maybe
-import Set exposing (Set)
-import Util exposing (orWith, uncons)
+import Util exposing (orWith)
 
 
 type alias Id =
@@ -34,6 +33,11 @@ topLevel id =
 fromList : List Id -> Path
 fromList =
     Array.fromList
+
+
+toList : Path -> List Id
+toList =
+    Array.toList
 
 
 sub : Path -> Id -> Path
@@ -94,6 +98,11 @@ at id (PathMap _ d) =
 subMaps : PathMap a -> List ( Id, PathMap a )
 subMaps (PathMap _ d) =
     Dict.toList d
+
+
+subMaps_ : PathMap a -> Dict Id (PathMap a)
+subMaps_ (PathMap _ d) =
+    d
 
 
 insert : Path -> a -> PathMap a -> PathMap a

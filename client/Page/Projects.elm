@@ -2,17 +2,18 @@ module Page.Projects exposing (..)
 
 import Array
 import Array.Extra as Array
-import Browser.Navigation as Nav
 import Data exposing (Auth, Data)
+import Data.Client as Client
 import Data.Project as Project
-import Data.User as User exposing (Project, User)
-import Firestore
+import Firestore exposing (..)
 import Firestore.Access as Access exposing (Accessor)
-import Firestore.Types exposing (Remote(..))
+import Firestore.Lens as Lens exposing (o)
+import Firestore.Path as Path
+import Firestore.Remote exposing (Remote(..))
 import Firestore.Update as Update exposing (Updater)
 import GDrive
-import Html exposing (Html, a, div, i, input, node, span, text)
-import Html.Attributes exposing (attribute, class, href, placeholder, style, type_)
+import Html exposing (Html, a, div, i, input, node, text)
+import Html.Attributes exposing (class, href, placeholder, style, type_)
 import Html.Events exposing (on, onClick, onInput)
 import Json.Decode as Decode
 import Util exposing (..)
@@ -106,39 +107,36 @@ update auth msg model =
         ( AddProject file, _ ) ->
             let
                 projectRef =
-                    Firestore.ref [ "projects", file.id ]
+                    Firestore.ref <| Path.fromList [ "projects", file.id ]
 
                 userRef =
-                    Firestore.ref [ "users", auth.uid ]
+                    Firestore.ref <| Path.fromList [ "users", auth.uid ]
             in
             ( model
-            , Update.updates
-                [ Update.collection Data.usersLens <|
-                    Update.doc auth.uid <|
-                        Update.modify User.encode <|
-                            \user ->
-                                { user
-                                    | projects =
-                                        Array.push projectRef user.projects
-                                }
-                , Update.collection Data.projectsLens <|
-                    Update.doc file.id <|
-                        Update.alter Project.encode <|
-                            \mp ->
-                                Just <|
-                                    case mp of
-                                        Nothing ->
-                                            User.Project
-                                                { name = file.name
-                                                , members = [ userRef ]
-                                                }
+            , Update.all
+                [ Update.modify (Data.myClient auth) Client.desc <|
+                    \client ->
+                        { client
+                            | projects =
+                                Array.push projectRef client.projects
+                        }
+                , Update.alter
+                    (o Data.projects <| Lens.doc file.id)
+                    Project.desc
+                  <|
+                    \mp ->
+                        Update.Update <|
+                            case mp of
+                                Nothing ->
+                                    { name = file.name
+                                    , members = [ userRef ]
+                                    }
 
-                                        Just (User.Project p) ->
-                                            User.Project
-                                                { p
-                                                    | members =
-                                                        userRef :: p.members
-                                                }
+                                Just p ->
+                                    { p
+                                        | members =
+                                            userRef :: p.members
+                                    }
                 ]
             , Cmd.none
             )
@@ -167,34 +165,42 @@ remote r f =
             f a
 
 
-view : Auth -> Model -> Data -> User -> Accessor (Html Msg)
-view auth model data user =
+view : Auth -> Model -> Data -> Accessor Data (Html Msg)
+view auth model data =
     flip Access.map
-        (Array.mapToList Access.get_ user.projects
-            |> Access.list
+        (Access.access
+            (o (Data.myClient auth) <|
+                o Lens.get Client.projects
+            )
+            data
+            |> Access.map Array.toList
+            |> Access.for
+                (Lens.derefAndAccess Data.project data
+                    >> Access.thenAccess Lens.get
+                    >> Access.remote
+                )
             |> Access.map (List.indexedMap Tuple.pair)
         )
     <|
-        -- Access.just <| flip identity [] <|
         \projects ->
             div []
                 [ div [ class "ui cards", style "margin" "20px" ] <|
                     List.append
                         (flip List.map
                             projects
-                            (\( i, rp ) ->
+                            (\( i, project ) ->
                                 a
                                     [ class "ui card centered"
                                     , href <| "/" ++ String.fromInt i
                                     ]
                                     [ div [ class "content" ]
-                                        [ remote rp <|
-                                            \(User.Project project) ->
-                                                div
-                                                    [ class
-                                                        "center aligned header"
-                                                    ]
-                                                    [ text project.name ]
+                                        [ -- remote rp <|
+                                          --    \project ->
+                                          div
+                                            [ class
+                                                "center aligned header"
+                                            ]
+                                            [ remote project <| .name >> text ]
                                         ]
                                     ]
                             )

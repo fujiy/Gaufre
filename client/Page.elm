@@ -3,15 +3,21 @@ module Page exposing (..)
 import Array
 import Browser
 import Data exposing (Auth, Data)
-import Data.User exposing (Project(..), User)
+import Data.Client as Client exposing (Client)
+import Data.Project exposing (Project)
+import Data.User exposing (User)
 import Firestore exposing (Firestore)
 import Firestore.Access as Access exposing (Accessor)
+import Firestore.Lens as Lens exposing (o)
 import Firestore.Update as Update exposing (Updater)
 import Html exposing (Attribute, Html, a, div, i, map, span, text)
 import Html.Attributes as Html exposing (class, href)
 import Html.Events exposing (onClick)
 import Maybe.Extra as Maybe
+import Page.Create as Create
 import Page.Dashboard as Dashboard
+import Page.Direct as Direct
+import Page.Manage as Manage
 import Page.Projects as Projects
 import Url exposing (Url)
 import Url.Builder
@@ -28,11 +34,17 @@ type alias Model =
 type Page
     = Projects Projects.Model
     | Dashboard Dashboard.Model
+    | Create Create.Model
+    | Direct Direct.Model
+    | Manage Manage.Model
 
 
 type Msg
     = ProjectsMsg Projects.Msg
     | DashboardMsg Dashboard.Msg
+    | CreateMsg Create.Msg
+    | DirectMsg Direct.Msg
+    | ManageMsg Manage.Msg
     | SignOut
 
 
@@ -52,14 +64,16 @@ urlChanged model url =
             Url.int
                 </> Url.oneOf
                         [ Url.map (Dashboard Dashboard.init) Url.top
+                        , Url.map (Create Create.init) <| Url.s "create"
+                        , Url.map (Direct Direct.init) <| Url.s "direct"
+                        , Url.map (Manage Manage.init) <| Url.s "manage"
                         ]
         ]
         |> flip Url.parse url
-        |> Debug.log "PARSE"
         |> Maybe.withDefault model
 
 
-update : Auth -> Msg -> Model -> ( Model, Updater (Firestore Data), Cmd Msg )
+update : Auth -> Msg -> Model -> ( Model, Updater Data, Cmd Msg )
 update auth msg model =
     case ( msg, model.page ) of
         ( ProjectsMsg m, Projects pm ) ->
@@ -68,7 +82,7 @@ update auth msg model =
                     Projects.update auth m pm
             in
             ( { model | page = Projects m_ }
-            , Update.firestore upd
+            , upd
             , Cmd.map ProjectsMsg cmd
             )
 
@@ -76,38 +90,70 @@ update auth msg model =
             ( model, Update.none, Cmd.none )
 
 
-view : Auth -> Model -> Data -> Accessor (Browser.Document Msg)
+view : Auth -> Model -> Data -> Accessor Data (Browser.Document Msg)
 view auth model data =
     let
-        user =
-            Access.doc data.users auth.uid
-
         project =
-            Access.map (.projects >> Array.get model.project) user
-                |> Access.andThen (Maybe.map Access.get >> Access.maybe)
+            Access.access
+                (o (Data.myClient auth) <|
+                    o Lens.get <|
+                        o Client.projects <|
+                            Lens.atArray model.project
+                )
+                data
+                |> Access.andThen (Lens.derefAndAccess Data.project data)
+                |> Access.thenAccess Lens.get
+                |> Access.maybe
     in
     Access.map (Browser.Document "Gaufre") <|
         Access.list <|
-            Access.andThen2 (menubar auth model data) user project
+            Access.andThen (menubar auth model data) project
                 :: (case model.page of
                         Projects m ->
-                            [ Access.andThen (Projects.view auth m data) user
+                            [ Projects.view auth m data
                                 |> Access.map (map ProjectsMsg)
                             ]
 
                         Dashboard m ->
                             [ Access.fromJust project
-                                |> Access.andThen2 (Dashboard.view auth m data) user
+                                |> Access.andThen
+                                    (Dashboard.view auth m data)
                                 |> Access.map (map DashboardMsg)
+                            ]
+
+                        Create m ->
+                            [ Access.fromJust project
+                                |> Access.andThen
+                                    (Create.view auth m data)
+                                |> Access.map (map CreateMsg)
+                            ]
+
+                        Direct m ->
+                            [ Access.fromJust project
+                                |> Access.andThen
+                                    (Direct.view auth m data)
+                                |> Access.map (map DirectMsg)
+                            ]
+
+                        Manage m ->
+                            [ Access.fromJust project
+                                |> Access.andThen
+                                    (Manage.view auth m data)
+                                |> Access.map (map ManageMsg)
                             ]
                    )
 
 
-menubar : Auth -> Model -> Data -> User -> Maybe Project -> Accessor (Html Msg)
-menubar auth model data user mproject =
+menubar : Auth -> Model -> Data -> Maybe Project -> Accessor Data (Html Msg)
+menubar auth model data mproject =
     let
         pg_ =
-            { projects = False, dashboard = False }
+            { projects = False
+            , dashboard = False
+            , create = False
+            , direct = False
+            , manage = False
+            }
 
         pg =
             case model.page of
@@ -117,12 +163,23 @@ menubar auth model data user mproject =
                 Dashboard _ ->
                     { pg_ | dashboard = True }
 
+                Create _ ->
+                    { pg_ | create = True }
+
+                Direct _ ->
+                    { pg_ | direct = True }
+
+                Manage _ ->
+                    { pg_ | manage = True }
+
         link p =
             href <| Url.Builder.absolute [ String.fromInt model.project, p ] []
     in
-    Access.just <|
-        div []
-            [ div [ class "ui secondary pointing menu" ]
+    flip Access.map
+        (Access.access (o (Data.me auth) Lens.get) data)
+    <|
+        \user ->
+            div [ class "ui secondary pointing menu" ]
                 [ a
                     [ class "item"
                     , classIf pg.projects "active"
@@ -132,11 +189,7 @@ menubar auth model data user mproject =
                         text "Projects"
 
                       else
-                        text <|
-                            Maybe.unwrap
-                                "No Project"
-                                (\(Project p) -> p.name)
-                                mproject
+                        text <| Maybe.unwrap "No Project" .name mproject
                     ]
                 , a
                     [ class "item"
@@ -144,9 +197,12 @@ menubar auth model data user mproject =
                     , link ""
                     ]
                     [ text "Dashboard" ]
-                , a [ class "item", link "create" ] [ text "Create" ]
-                , a [ class "item", link "direct" ] [ text "Direct" ]
-                , a [ class "item", link "manage" ] [ text "Manage" ]
+                , a [ class "item", classIf pg.create "active", link "create" ]
+                    [ text "Create" ]
+                , a [ class "item", classIf pg.direct "active", link "direct" ]
+                    [ text "Direct" ]
+                , a [ class "item", classIf pg.manage "active", link "manage" ]
+                    [ text "Manage" ]
                 , div [ class "right menu" ]
                     [ a
                         [ class "item"
@@ -156,6 +212,7 @@ menubar auth model data user mproject =
                     ]
                 ]
 
-            -- , div [ class "ui fluid popup bottom right transition hidden" ]
-            --     [ Button.primary SignOut "Sign Out" ]
-            ]
+
+
+-- , div [ class "ui fluid popup bottom right transition hidden" ]
+--     [ Button.primary SignOut "Sign Out" ]

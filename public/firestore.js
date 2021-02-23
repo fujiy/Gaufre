@@ -2,7 +2,6 @@
 function initialize(app) {
     const db = firebase.firestore()
 
-
     function encode(object) {
         if (typeof object != 'object' || object === null) return object
         if (object instanceof Array) {
@@ -12,7 +11,7 @@ function initialize(app) {
             }
             return array
         }
-        else if (object.__doc__) return reference(object.path)
+        else if (object.__path__) return reference(object.__path__)
         else {
             let newobj = {}
             for (const [key, value] of Object.entries(object)) {
@@ -21,62 +20,6 @@ function initialize(app) {
             return newobj
         }
     }
-
-    function decode(object) {
-        if (typeof object != 'object' || object === null) return object
-        if (object instanceof Array) {
-            let array = []
-            for (const value of object) {
-                array.push(decode(value))
-            }
-            return array
-        }
-        else if (object instanceof firebase.firestore.DocumentReference) {
-            return getData(object.path.split('/')) || {
-                data: null,
-                path: object.path.split('/'),
-                status: 'loading',
-                __doc__: true,
-            }
-        }
-        else {
-            let newobj = {}
-            for (const [key, value] of Object.entries(object)) {
-                newobj[key] = decode(value)
-            }
-            return newobj
-        }
-    }
-
-    function update(object) {
-        if (typeof object != 'object' || object === null) return object
-        if (object instanceof Array) {
-            let array = []
-            for (const value of object) {
-                array.push(update(value))
-            }
-            return array
-        }
-        else if (object.__doc__) {
-            if (object.updated) return object
-            object.updated = true
-            let newobj = getData(object.path)
-            if (!newobj) return object
-            newobj.updated = true
-            newobj.__doc__ = true
-            newobj.data = update(newobj.data)
-            return newobj
-        }
-        else {
-            let newobj = {}
-            for (const [key, value] of Object.entries(object)) {
-                newobj[key] = update(value)
-            }
-            return newobj
-        }
-    }
-
-
 
     function reference(path) {
         let ref = db;
@@ -92,76 +35,75 @@ function initialize(app) {
         return ref
     }
 
-    let data;
+    function makePathMap(path, item) {
+        const object = {}
+        let obj = object
+        let i = 0
+        while (i < path.length) {
+            obj.item = null
+            obj.sub = {}
+            obj.sub[path[i]] = {}
+            obj = obj.sub[path[i]]
+            i++;
+        }
+        obj.item = item
+        obj.sub = {}
+        return object
+    }
 
-    function getData(path) {
-        let d = data;
-        let i = 0;
-        while (true) {
-            if (i >= path.length) return d
-            d = d[path[i]]
-            if (!d) return null
-            i++
-            if (i >= path.length) return d
-            d = d.documents[path[i]]
-            if (!d) return null
-            i++
+    function listen(path, paths, tree) {
+        if (paths.item && !tree.__listener__) {
+            tree.__listener__ =
+                reference(path).onSnapshot({
+                    includeMetadataChanges: true
+                    }, doc => {
+                    const updates = makePathMap(
+                        path,
+                        {status: doc.data() ? "uptodate" : "failure",
+                         value: doc.data() || null}
+                    )
+
+                        console.log("snapshot", path, doc, doc.metadata,
+                                    updates);
+                    if (!doc.metadata.hasPendingWrites &&
+                        app.ports.firestoreSubPort)
+                        app.ports.firestoreSubPort.send({updates: updates})
+                })
+        }
+
+        for (const [id, subPaths] of Object.entries(paths.sub)) {
+            if (!tree[id]) tree[id] = {}
+            const subPath = path.slice()
+            subPath.push(id)
+            listen(subPath, subPaths, tree[id])
         }
     }
-    let c = 0;
 
-    function request(path){
-        let d = getData(path)
-        if (d && d.status != 'loading') return
-
-        if (c++ > 100) return
-
-
-        if (d && d.asked) return
-        if (d) d.asked = true
-        else data[path[0]].documents[path[1]] = {asked: true}
-
-        console.log("req", path, d)
-
-        reference(path).get().then(doc => {
-            const document = {
-                data: decode(doc.data()),
-                path: path,
-                status: doc.exists ? 'uptodate' : 'failure'
+    function update(path, pathMap) {
+        if (pathMap.item) {
+            const upd = pathMap.item
+            console.log("update", path, upd)
+            switch (upd.type) {
+            case "set":
+                reference(path).set(encode(upd.value.value))
+                break
             }
-
-            data[path[0]].documents[path[1]] = document
-
-            data = update(data)
-
-            console.log("data", path, document, data)
-            if (app.ports.watcherPort) {
-                app.ports.watcherPort.send(data)
-
-                // setTimeout(() => {app.ports.watcherPort.send(data)}, 2000)
-            }
-        }).catch(err => {
-            console.log("fetch error", err)
-        })
+        }
+        for (const [id, subMap] of Object.entries(pathMap.sub)) {
+            const subPath = path.slice()
+            subPath.push(id)
+            update(subPath, subMap)
+        }
     }
 
-    if (app.ports.updatePort) {
-        app.ports.updatePort.subscribe(v => {
-            console.log("update", v);
-            data = v.value
-            for (const upd of v.documents) {
-                switch (upd.type) {
-                case "whole":
-                    const encdata = encode(upd.value.data)
-                    console.log('enc', encdata)
-                    reference(upd.path).set(encdata)
-                    break
-                case "delete":
-                    reference(upd.path).delete()
-                    break
-                }
-            }
-            for (const path of v.requests) request(path)
+    let listeners = {}
+
+    if (app.ports.firestoreCmdPort) {
+        app.ports.firestoreCmdPort.subscribe(v => {
+            console.log("command", v);
+
+            listen([], v.listen, listeners)
+            update([], v.updates)
         })
     }
 }

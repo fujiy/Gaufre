@@ -14,6 +14,9 @@ service cloud.firestore {
         function isMemberOf() {
             return userPath(request.auth.uid) in request.resource.data.members;
         }
+        match /clients/{userId} {
+            allow read, write: if isUserAuth(userId);
+        }
 
         match /users/{userId} {
             allow get: if isAuth();

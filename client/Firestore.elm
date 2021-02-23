@@ -1,132 +1,220 @@
-module Firestore exposing (..)
+module Firestore exposing
+    ( CmdPort
+    , Collection
+    , Document
+    , Firestore
+    , FirestoreSub
+    , Lens
+    , Reference
+    , SubPort
+    , apply
+    , init
+    , ref
+    , render
+    , update
+    , watch
+    )
 
--- import Firestore.Update as Update
-
-import Array
-import Dict
-import Firestore.Access as Access
-import Firestore.Desc exposing (FirestoreDesc)
+import Firestore.Desc as Desc exposing (Desc, FirestoreDesc(..))
 import Firestore.Internal as Internal exposing (..)
-import Firestore.Path as Path exposing (Id, Path, Paths)
-import Firestore.Remote exposing (Remote(..))
-import Json.Encode exposing (Value)
+import Firestore.Path as Path exposing (Path, PathMap, Paths)
+import Firestore.Remote as Remote exposing (Remote(..))
+import Json.Decode as Decode
+import Json.Encode as Encode exposing (Value)
 
 
 type Firestore r
     = Firestore
-        { data : r
-        , laters : Updater (Firestore r)
+        { desc : FirestoreDesc r
+        , data : r
+        , afterwards : Updater r
         , listenings : Paths
-        , desc : FirestoreDesc r
+        , errors : List Decode.Error
         }
 
 
-type alias Collection r =
-    Internal.Collection r
+type FirestoreSub r
+    = FirestoreSub
+        { desc : FirestoreDesc r
+        , data : r
+        , afterwards : Updater r
+        , listenings : Paths
+        , errors : List Decode.Error
+        }
 
 
-type alias Document r =
-    Internal.Document r
+type alias Collection s r =
+    Internal.Collection s r
 
 
-type alias Reference r =
-    Internal.Reference r
+type alias Document s r =
+    Internal.Document s r
+
+
+type alias Reference s r =
+    Internal.Reference s r
 
 
 type alias Lens a b =
     Internal.Lens a b
 
 
-
--- type alias Remote =
---     Internal.Remote(..)
-
-
-type alias WatcherPort msg =
+type alias SubPort msg =
     (Value -> msg) -> Sub msg
 
 
-type alias UpdaterPort msg =
+type alias CmdPort msg =
     Value -> Cmd msg
 
 
-ref : Path -> Reference r
-ref p =
-    Reference p (\_ -> Document Loading)
+ref : Path -> Reference s r
+ref =
+    Reference
 
 
-collection : Collection r
-collection =
-    Internal.Collection "" Dict.empty
+init : FirestoreDesc r -> Firestore r
+init (FirestoreDesc d) =
+    Firestore
+        { desc = FirestoreDesc d
+        , data = d.empty
+        , afterwards = noUpdater
+        , listenings = Path.empty
+        , errors = []
+        }
 
 
+watch : SubPort (FirestoreSub r) -> Firestore r -> Sub (FirestoreSub r)
+watch p (Firestore fs) =
+    p <|
+        \v ->
+            let
+                ( updates, errors ) =
+                    case Decode.decodeValue decodeSubscription v of
+                        Ok sub ->
+                            ( sub.updates, fs.errors )
 
--- init : Decoder (Firestore r) -> Firestore r
--- init (Decode.Decoder dec) =
---     case Json.decodeString dec "{}" of
---         Err err ->
---             Debug.todo <| Json.errorToString err
---         Ok fs ->
---             fs
--- render :
---     UpdaterPort msg
---     -> Encoder (Firestore r)
---     -> (r -> Accessor a)
---     -> Firestore r
---     -> ( Firestore r, Maybe a, Cmd msg )
--- render p enc =
---     update p enc Update.none
--- update :
---     UpdaterPort msg
---     -> Encoder (Firestore r)
---     -> Updater (Firestore r)
---     -> (r -> Accessor a)
---     -> Firestore r
---     -> ( Firestore r, Maybe a, Cmd msg )
--- update p enc upd use (Firestore r) =
---     let
---         upds =
---             runUpdater upd <| Firestore r
---         (Firestore new) =
---             upds.value
---         newfs =
---             Firestore { new | laters = Update.both upds.laters new.laters }
---         (Accessor paths ma) =
---             use new.data
---         upds_ =
---             { upds | requests = Array.append paths upds.requests }
---     in
---     ( newfs, ma, p <| unValue <| Encode.updates enc upds_ )
--- digest :
---     UpdaterPort msg
---     -> Encoder (Firestore r)
---     -> (r -> Accessor a)
---     -> Firestore r
---     -> ( Firestore r, Maybe a, Cmd msg )
--- digest p enc use (Firestore r) =
---     let
---         upds =
---             runUpdater r.laters <| Firestore r
---         (Firestore new) =
---             upds.value
---         newfs =
---             Firestore { new | laters = upds.laters }
---         (Accessor paths ma) =
---             use new.data
---         upds_ =
---             { upds | requests = Array.append paths upds.requests }
---     in
---     ( newfs, ma, p <| unValue <| Encode.updates enc upds_ )
--- watch :
---     WatcherPort (Firestore r)
---     -> Decoder (Firestore r)
---     -> Firestore r
---     -> Sub (Firestore r)
--- watch p dec (Firestore r) =
---     p <|
---         \v ->
---             let
---                 (Firestore new) =
---                     Decode.decode dec <| Value v
---             in
---             Firestore { new | laters = r.laters }
+                        Err err ->
+                            ( Path.empty, err :: fs.errors )
+
+                (FirestoreDesc { applier }) =
+                    fs.desc
+            in
+            case applier updates fs.data of
+                Ok r ->
+                    FirestoreSub { fs | data = r, errors = errors }
+
+                Err err ->
+                    FirestoreSub { fs | errors = err :: errors }
+
+
+apply :
+    CmdPort msg
+    -> (r -> Accessor r a)
+    -> FirestoreSub r
+    -> ( Firestore r, Maybe a, Cmd msg )
+apply p use (FirestoreSub fs) =
+    update p fs.afterwards use (Firestore fs)
+
+
+update :
+    CmdPort msg
+    -> Updater r
+    -> (r -> Accessor r a)
+    -> Firestore r
+    -> ( Firestore r, Maybe a, Cmd msg )
+update p (Updater updater) use (Firestore fs) =
+    let
+        upds =
+            updater fs.data
+
+        (Accessor requests ra) =
+            use upds.value
+
+        listenings =
+            Path.append requests upds.requests
+
+        ( listens, unlistens ) =
+            Path.diff listenings fs.listenings
+    in
+    ( Firestore
+        { fs
+            | data = upds.value
+            , listenings = listenings
+            , afterwards = upds.afterwards
+        }
+    , Remote.toMaybe ra
+    , p <| encodeCommand <| Command listens unlistens upds.updates
+    )
+
+
+render :
+    CmdPort msg
+    -> (r -> Accessor r a)
+    -> Firestore r
+    -> ( Firestore r, Maybe a, Cmd msg )
+render p use =
+    update p noUpdater use
+
+
+type alias Command =
+    { listen : Paths
+    , unlisten : Paths
+    , updates : PathMap Update
+    }
+
+
+type alias Subscription =
+    { updates : PathMap Value }
+
+
+encodeCommand : Command -> Value
+encodeCommand command =
+    Encode.object
+        [ ( "listen", Desc.paths.encoder command.listen )
+        , ( "unlisten", Desc.paths.encoder command.unlisten )
+        , ( "updates", (Desc.pathMap updateDesc).encoder command.updates )
+        ]
+
+
+decodeSubscription : Decode.Decoder Subscription
+decodeSubscription =
+    Decode.map Subscription <|
+        Decode.field "updates" <|
+            (Desc.pathMap Desc.value).decoder
+
+
+updateDesc : Desc Update
+updateDesc =
+    Desc
+        (\u ->
+            case u of
+                Set v ->
+                    Encode.object
+                        [ ( "type", Encode.string "set" ), ( "value", v ) ]
+
+                Add v ->
+                    Encode.object
+                        [ ( "type", Encode.string "add" ), ( "value", v ) ]
+
+                Delete ->
+                    Encode.object [ ( "type", Encode.string "delete" ) ]
+        )
+        (Decode.andThen
+            (\t ->
+                case t of
+                    "set" ->
+                        Decode.map Set <|
+                            Decode.field "value" Decode.value
+
+                    "add" ->
+                        Decode.map Add <|
+                            Decode.field "value" Decode.value
+
+                    "delete" ->
+                        Decode.succeed Delete
+
+                    _ ->
+                        Decode.fail <| "unknown type: " ++ t
+            )
+            (Decode.field "type" Decode.string)
+        )

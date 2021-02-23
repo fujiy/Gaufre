@@ -1,16 +1,14 @@
 module Data exposing (..)
 
 import Array
-import Browser.Navigation as Nav
-import Data.Client as Client exposing (Client)
-import Data.Project as Project exposing (Project)
-import Data.User as User exposing (User)
+import Data.Client as Client
+import Data.Project as Project
+import Data.User as User
 import Firestore exposing (..)
-import Firestore.Decode as Decode
-import Firestore.Encode as Encode
+import Firestore.Desc as Desc exposing (FirestoreDesc)
+import Firestore.Lens as Lens exposing (o)
 import Firestore.Update as Update
 import Maybe.Extra as Maybe
-import Monocle.Lens exposing (Lens)
 
 
 type alias Auth =
@@ -21,47 +19,55 @@ type alias Auth =
 
 
 type alias Data =
-    { users : Collection User
-    , projects : Collection Project
+    { users : User.Collection
+    , clients : Client.Collection
+    , projects : Project.Collection
     }
 
 
-
--- clientsLens : Lens Data (Collection Client)
--- clientsLens = Lens .clients (\b a -> { a | clients = b })
-
-
-usersLens : Lens Data (Collection User)
-usersLens =
-    Lens .users (\b a -> { a | users = b })
+clients : Lens Data Client.Collection
+clients =
+    Lens.collection .clients (\b a -> { a | clients = b })
 
 
-projectsLens : Lens Data (Collection Project)
-projectsLens =
-    Lens .projects (\b a -> { a | projects = b })
+users : Lens Data User.Collection
+users =
+    Lens.collection .users (\b a -> { a | users = b })
 
 
-encode : Encode.Encoder (Firestore Data)
-encode =
-    Encode.firestore
-        [ Encode.collection "users" .users User.encode
-        , Encode.collection "projects" .projects Project.encode
-        ]
+projects : Lens Data Project.Collection
+projects =
+    Lens.collection .projects (\b a -> { a | projects = b })
 
 
-decode : Decode.Decoder (Firestore Data)
-decode =
-    Decode.firestore Data
-        |> Decode.collection "users" User.decode
-        |> Decode.collection "projects" Project.decode
+myClient : Auth -> Lens Data Client.Document
+myClient auth =
+    o clients <| Lens.doc auth.uid
 
 
-initClient : Auth -> Update.Updater (Firestore Data)
+me : Auth -> Lens Data User.Document
+me auth =
+    o users <| Lens.doc auth.uid
+
+
+project : Lens.Dereferer Data Project.Document
+project =
+    Lens.dereferer projects
+
+
+desc : FirestoreDesc Data
+desc =
+    Desc.collection "users" .users User.desc
+        >> Desc.collection "clients" .clients Client.desc
+        >> Desc.collection "projects" .projects Project.desc
+        |> Desc.firestore Data
+
+
+initClient : Auth -> Update.Updater Data
 initClient auth =
-    Update.firestore <|
-        Update.updates
-            [ Update.collection usersLens <|
-                Update.doc auth.uid <|
-                    Update.default User.encode
-                        { name = auth.name, projects = Array.empty }
-            ]
+    Update.all
+        [ Update.default (me auth) User.desc <|
+            { name = auth.name }
+        , Update.default (myClient auth) Client.desc <|
+            { projects = Array.empty }
+        ]
