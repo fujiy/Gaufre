@@ -6,6 +6,7 @@ import Dict exposing (Dict)
 import Dict.Extra as Dict
 import Firestore exposing (..)
 import Firestore.Desc as Desc exposing (Desc, DocumentDesc)
+import Firestore.Lens as Lens exposing (o)
 import Firestore.Path exposing (Id)
 import GDrive
 import Maybe.Extra as Maybe
@@ -36,6 +37,16 @@ type alias Document =
     Firestore.Document Sub Project
 
 
+works : Lens Document Work.Collection
+works =
+    Lens.subCollection .works (\b a -> { a | works = b })
+
+
+work : Id -> Lens Document Work.Document
+work id =
+    o works <| Lens.doc id
+
+
 init : GDrive.FileMeta -> User.Reference -> Project
 init file user =
     { name = file.name
@@ -50,8 +61,8 @@ makePartName i =
     "カット" ++ String.fromInt i
 
 
-addPart : Project -> Project
-addPart p =
+newPart : Project -> ( PartId, Part )
+newPart p =
     let
         last =
             Dict.values p.parts
@@ -77,11 +88,8 @@ addPart p =
                   , parent = Nothing
                   }
                 )
-
-        ( newId, newPart ) =
-            try (Dict.size p.parts) (Dict.size p.parts)
     in
-    { p | parts = Dict.insert newId newPart p.parts }
+    try (Dict.size p.parts) (Dict.size p.parts)
 
 
 desc : DocumentDesc Sub Project

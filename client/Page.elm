@@ -1,12 +1,13 @@
 module Page exposing (..)
 
 import Browser
-import Data exposing (Auth, Data)
+import Data exposing (Auth, Data, project)
 import Data.Client as Client
 import Data.Project exposing (Project)
 import Firestore
 import Firestore.Access as Access exposing (Accessor)
 import Firestore.Lens as Lens exposing (o)
+import Firestore.Path as Path
 import Firestore.Update as Update exposing (Updater)
 import Html exposing (Html, a, div, i, map, text)
 import Html.Attributes as Html exposing (class, href, style)
@@ -95,16 +96,23 @@ update auth message model =
 view : Auth -> Model -> Data -> Accessor Data (Browser.Document Msg)
 view auth model data =
     let
-        project =
+        projectAndPaths =
             Access.access
                 (o (Data.currentProject auth model.project) Lens.get)
                 data
                 |> Access.maybe
+                |> Access.withPaths
+
+        project =
+            Access.map Tuple.second projectAndPaths
+
+        projectId =
+            Access.map
+                (Tuple.first >> List.head >> Maybe.andThen Path.getLast)
+                projectAndPaths
     in
     Access.map (Browser.Document "Gaufre") <|
-        -- Access.map (\htmls -> [ div [ class "ui grid" ] htmls ]) <|
-        Access.list
-        <|
+        Access.list <|
             [ Access.andThen (sidemenu auth model data) project
             , Access.map
                 (\html ->

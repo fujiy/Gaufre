@@ -151,6 +151,14 @@ access (Lens acc _) a =
     acc a
 
 
+withPaths : Accessor r a -> Accessor r ( List Path, a )
+withPaths (Accessor paths ra) =
+    Accessor paths <|
+        Remote.map
+            (\a -> ( Path.toList paths |> List.map Tuple.first, a ))
+            ra
+
+
 accessMap : Lens a r -> a -> (r -> b) -> Accessor a b
 accessMap (Lens acc _) a f =
     map f <| acc a

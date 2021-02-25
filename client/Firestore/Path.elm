@@ -45,6 +45,15 @@ sub path id =
     Array.push id path
 
 
+getLast : Path -> Maybe Id
+getLast p =
+    if Array.isEmpty p then
+        Nothing
+
+    else
+        Array.get (Array.length p - 1) p
+
+
 type alias Paths =
     PathMap ()
 
