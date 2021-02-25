@@ -235,6 +235,39 @@ doc id =
         )
 
 
+getAll : Lens (Collection s r) (List ( Id, Remote r ))
+getAll =
+    Lens
+        (\(Collection col) ->
+            Accessor
+                (Path.rootItem ())
+                (Dict.toList col.docs
+                    |> List.map (\( id, Document _ r ) -> ( id, r ))
+                    |> UpToDate
+                )
+        )
+        (\u xs ->
+            Updater <|
+                \(Collection col) ->
+                    { value =
+                        Collection
+                            { col
+                                | docs =
+                                    List.foldr
+                                        (\( id, r ) ->
+                                            Dict.insert id <|
+                                                Document col.empty r
+                                        )
+                                        col.docs
+                                        xs
+                            }
+                    , updates = Path.rootItem u
+                    , requests = Path.empty
+                    , afterwards = noUpdater
+                    }
+        )
+
+
 get : Lens (Document s r) r
 get =
     Lens (\(Document _ r) -> Accessor (Path.rootItem ()) r)

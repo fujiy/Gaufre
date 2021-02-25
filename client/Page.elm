@@ -138,7 +138,9 @@ view auth model data =
                     Browse m ->
                         Access.fromJust project
                             |> Access.andThen
-                                (Browse.view auth m data)
+                                (Browse.view auth m data <|
+                                    Data.currentProject auth model.project
+                                )
                             |> Access.map (map BrowseMsg)
             ]
 

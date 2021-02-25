@@ -21,6 +21,11 @@ function initialize(app) {
         }
     }
 
+    function makeDoc(doc) {
+        return {status: doc.data() ? "uptodate" : "failure",
+                value: doc.data() || null}
+    }
+
     function reference(path) {
         let ref = db;
         let i = 0;
@@ -51,24 +56,52 @@ function initialize(app) {
         return object
     }
 
+    function makePathMapAt(path, sub) {
+        const object = {}
+        let obj = object
+        let i = 0
+        while (i < path.length) {
+            obj.item = null
+            obj.sub = {}
+            obj.sub[path[i]] = {}
+            obj = obj.sub[path[i]]
+            i++;
+        }
+        obj.item = sub.item
+        obj.sub = sub.sub
+        return object
+    }
+
     function listen(path, paths, tree) {
         if (paths.item && !tree.__listener__) {
-            tree.__listener__ =
-                reference(path).onSnapshot({
-                    includeMetadataChanges: true
-                    }, doc => {
-                    const updates = makePathMap(
-                        path,
-                        {status: doc.data() ? "uptodate" : "failure",
-                         value: doc.data() || null}
-                    )
+            if (path.length % 2 == 1) {
+                tree.__listener__ =
+                    reference(path).onSnapshot({
+                        includeMetadataChanges: true
+                    }, querySnapshot => {
+                        const map = {item: null, sub: {}}
+                        querySnapshot.forEach( doc => {
+                            map.sub[doc.id] = {item: makeDoc(doc), sub: {}}
+                        })
+                        const updates = makePathMapAt(path, map)
 
-                        console.log("snapshot", doc, 
-                                    showPathMap(updates)[0]);
-                    if (!doc.metadata.hasPendingWrites &&
-                        app.ports.firestoreSubPort)
-                        app.ports.firestoreSubPort.send({updates: updates})
-                })
+                        console.log("snapshots", showPathMap(updates))
+                        if (!querySnapshot.metadata.hasPendingWrites)
+                            sendSub({updates: updates})
+                    })
+            }
+            else {
+                tree.__listener__ =
+                    reference(path).onSnapshot({
+                        includeMetadataChanges: true
+                    }, doc => {
+                        const updates = makePathMap(path, makeDoc(doc))
+
+                        console.log("snapshot", doc, showPathMap(updates)[0]);
+                        if (!doc.metadata.hasPendingWrites)
+                            sendSub({updates: updates})
+                    })
+            }
         }
 
         for (const [id, subPaths] of Object.entries(paths.sub)) {
@@ -121,6 +154,11 @@ function initialize(app) {
             return result
         }
         return go([], pm, []);
+    }
+
+    function sendSub(v) {
+        if (app.ports.firestoreSubPort)
+            app.ports.firestoreSubPort.send(v)
     }
 
     let listeners = {}
