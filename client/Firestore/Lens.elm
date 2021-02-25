@@ -277,6 +277,18 @@ get =
 -- Reference
 
 
+ref : Lens a (Document s r) -> a -> Reference s r
+ref (Lens acc _) a =
+    let
+        (Accessor paths _) =
+            acc a
+    in
+    Path.toList paths
+        |> List.head
+        |> Maybe.unwrap Path.root Tuple.first
+        |> Reference
+
+
 type Dereferer d a
     = Dereferer (List Id -> ( List Id, Lens d a ))
 
@@ -290,7 +302,7 @@ sub sl (Dereferer f) =
                     ( ids_, o s <| o sl <| doc id )
 
                 ( ids_, s ) ->
-                    ( ids_, o s <| fail <| Path.fromList ids_ )
+                    ( ids_, o s <| fail <| Path.fromIds ids_ )
 
 
 dereferer : Lens d (Collection s r) -> Dereferer d (Document s r)
@@ -302,17 +314,17 @@ dereferer l =
                     ( ids_, o l <| doc id )
 
                 ids_ ->
-                    ( ids_, fail <| Path.fromList ids )
+                    ( ids_, fail <| Path.fromIds ids )
 
 
 deref : Dereferer d (Document s r) -> Reference s r -> Lens d (Document s r)
 deref (Dereferer f) (Reference path) =
-    case f <| Path.toList path of
+    case f <| Path.toIds path of
         ( [], l ) ->
             l
 
         ( ids, l ) ->
-            fail <| Path.fromList ids
+            fail <| Path.fromIds ids
 
 
 fail : Path -> Lens a b

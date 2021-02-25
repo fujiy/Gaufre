@@ -30,13 +30,13 @@ topLevel id =
     Array.fromList [ id ]
 
 
-fromList : List Id -> Path
-fromList =
+fromIds : List Id -> Path
+fromIds =
     Array.fromList
 
 
-toList : Path -> List Id
-toList =
+toIds : Path -> List Id
+toIds =
     Array.toList
 
 
@@ -139,6 +139,31 @@ map f (PathMap m d) =
 subMap : Id -> PathMap a -> PathMap a
 subMap id m =
     PathMap Nothing <| Dict.singleton id m
+
+
+toList : PathMap a -> List ( Path, a )
+toList =
+    toList_ >> List.map (\( p, a ) -> ( fromIds p, a ))
+
+
+toList_ : PathMap a -> List ( List Id, a )
+toList_ (PathMap m d) =
+    let
+        subs =
+            Dict.toList d
+                |> List.concatMap
+                    (\( id, pm ) ->
+                        toList_ pm
+                            |> List.map
+                                (\( ids, a ) -> ( id :: ids, a ))
+                    )
+    in
+    case m of
+        Nothing ->
+            subs
+
+        Just a ->
+            ( [], a ) :: subs
 
 
 merge : (a -> a -> a) -> PathMap a -> PathMap a -> PathMap a

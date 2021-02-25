@@ -1,7 +1,8 @@
 module GDrive exposing (..)
 
-import Http exposing (Error)
+import Http exposing (Body, Error)
 import Json.Decode as Decode exposing (Decoder)
+import Json.Encode as Encode
 
 
 type alias Token =
@@ -37,6 +38,22 @@ folders token name =
         ]
 
 
+createFolder : Token -> String -> List Id -> Cmd (Result Error FileMeta)
+createFolder token name parents =
+    request_ token
+        "POST"
+        "files"
+        []
+        (Encode.object
+            [ ( "name", Encode.string name )
+            , ( "mimeType", Encode.string "application/vnd.google-apps.folder" )
+            , ( "parents", Encode.list Encode.string parents )
+            ]
+            |> Http.jsonBody
+        )
+        decodeFileMeta
+
+
 files_list :
     Token
     -> List ( String, String )
@@ -55,6 +72,18 @@ request :
     -> Decoder a
     -> Cmd (Result Http.Error a)
 request token method api options decoder =
+    request_ token method api options Http.emptyBody decoder
+
+
+request_ :
+    Token
+    -> String
+    -> String
+    -> List ( String, String )
+    -> Body
+    -> Decoder a
+    -> Cmd (Result Http.Error a)
+request_ token method api options body decoder =
     Http.request
         { method = method
         , headers =
@@ -71,7 +100,7 @@ request token method api options decoder =
                     )
                     ""
                     options
-        , body = Http.emptyBody
+        , body = body
         , expect = Http.expectJson identity decoder
         , timeout = Nothing
         , tracker = Nothing

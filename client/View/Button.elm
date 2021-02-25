@@ -1,14 +1,23 @@
 module View.Button exposing (..)
 
-import Html exposing (..)
-import Html.Attributes exposing (..)
-import Html.Events exposing (..)
+import Html exposing (Html, button, i, text)
+import Html.Attributes exposing (class)
+import Html.Events exposing (onClick)
 
 
 primary : msg -> String -> Html msg
-primary msg text =
+primary msg txt =
     button
         [ onClick msg
         , class "ui primary button"
         ]
-        [ Html.text text ]
+        [ text txt ]
+
+
+add : msg -> Html msg
+add msg =
+    button
+        [ class "ui icon button"
+        , onClick msg
+        ]
+        [ i [ class "plus icon" ] [] ]

@@ -18,6 +18,10 @@ type alias Document =
     Firestore.Document () User
 
 
+type alias Reference =
+    Firestore.Reference () User
+
+
 desc : DocumentDesc () User
 desc =
     Desc.document User <|

@@ -1,23 +1,19 @@
 module Page exposing (..)
 
-import Array
 import Browser
 import Data exposing (Auth, Data)
-import Data.Client as Client exposing (Client)
+import Data.Client as Client
 import Data.Project exposing (Project)
-import Data.User exposing (User)
-import Firestore exposing (Firestore)
+import Firestore
 import Firestore.Access as Access exposing (Accessor)
 import Firestore.Lens as Lens exposing (o)
 import Firestore.Update as Update exposing (Updater)
-import Html exposing (Attribute, Html, a, div, i, map, span, text)
-import Html.Attributes as Html exposing (class, href)
+import Html exposing (Html, a, div, i, map, text)
+import Html.Attributes as Html exposing (class, href, style)
 import Html.Events exposing (onClick)
 import Maybe.Extra as Maybe
-import Page.Create as Create
+import Page.Browse as Browse
 import Page.Dashboard as Dashboard
-import Page.Direct as Direct
-import Page.Manage as Manage
 import Page.Projects as Projects
 import Url exposing (Url)
 import Url.Builder
@@ -34,17 +30,13 @@ type alias Model =
 type Page
     = Projects Projects.Model
     | Dashboard Dashboard.Model
-    | Create Create.Model
-    | Direct Direct.Model
-    | Manage Manage.Model
+    | Browse Browse.Model
 
 
 type Msg
     = ProjectsMsg Projects.Msg
     | DashboardMsg Dashboard.Msg
-    | CreateMsg Create.Msg
-    | DirectMsg Direct.Msg
-    | ManageMsg Manage.Msg
+    | BrowseMsg Browse.Msg
     | SignOut
 
 
@@ -63,10 +55,9 @@ urlChanged model url =
         , Url.map (flip Model) <|
             Url.int
                 </> Url.oneOf
-                        [ Url.map (Dashboard Dashboard.init) Url.top
-                        , Url.map (Create Create.init) <| Url.s "create"
-                        , Url.map (Direct Direct.init) <| Url.s "direct"
-                        , Url.map (Manage Manage.init) <| Url.s "manage"
+                        [ Url.map (Dashboard Dashboard.init) <|
+                            Url.s "dashboard"
+                        , Url.map (Browse Browse.init) Url.top
                         ]
         ]
         |> flip Url.parse url
@@ -106,53 +97,46 @@ view auth model data =
                 |> Access.maybe
     in
     Access.map (Browser.Document "Gaufre") <|
-        Access.list <|
-            Access.andThen (menubar auth model data) project
-                :: (case model.page of
-                        Projects m ->
-                            [ Projects.view auth m data
-                                |> Access.map (map ProjectsMsg)
-                            ]
+        -- Access.map (\htmls -> [ div [ class "ui grid" ] htmls ]) <|
+        Access.list
+        <|
+            [ Access.andThen (sidemenu auth model data) project
+            , Access.map
+                (\html ->
+                    div
+                        [ class "pusher"
+                        , style "width" "calc(100% - 210px)"
+                        , style "margin-left" "210px"
+                        ]
+                        [ html ]
+                )
+              <|
+                case model.page of
+                    Projects m ->
+                        Projects.view auth m data
+                            |> Access.map (map ProjectsMsg)
 
-                        Dashboard m ->
-                            [ Access.fromJust project
-                                |> Access.andThen
-                                    (Dashboard.view auth m data)
-                                |> Access.map (map DashboardMsg)
-                            ]
+                    Dashboard m ->
+                        Access.fromJust project
+                            |> Access.andThen
+                                (Dashboard.view auth m data)
+                            |> Access.map (map DashboardMsg)
 
-                        Create m ->
-                            [ Access.fromJust project
-                                |> Access.andThen
-                                    (Create.view auth m data)
-                                |> Access.map (map CreateMsg)
-                            ]
-
-                        Direct m ->
-                            [ Access.fromJust project
-                                |> Access.andThen
-                                    (Direct.view auth m data)
-                                |> Access.map (map DirectMsg)
-                            ]
-
-                        Manage m ->
-                            [ Access.fromJust project
-                                |> Access.andThen
-                                    (Manage.view auth m data)
-                                |> Access.map (map ManageMsg)
-                            ]
-                   )
+                    Browse m ->
+                        Access.fromJust project
+                            |> Access.andThen
+                                (Browse.view auth m data)
+                            |> Access.map (map BrowseMsg)
+            ]
 
 
-menubar : Auth -> Model -> Data -> Maybe Project -> Accessor Data (Html Msg)
-menubar auth model data mproject =
+sidemenu : Auth -> Model -> Data -> Maybe Project -> Accessor Data (Html Msg)
+sidemenu auth model data mproject =
     let
         pg_ =
             { projects = False
             , dashboard = False
-            , create = False
-            , direct = False
-            , manage = False
+            , browse = False
             }
 
         pg =
@@ -163,14 +147,8 @@ menubar auth model data mproject =
                 Dashboard _ ->
                     { pg_ | dashboard = True }
 
-                Create _ ->
-                    { pg_ | create = True }
-
-                Direct _ ->
-                    { pg_ | direct = True }
-
-                Manage _ ->
-                    { pg_ | manage = True }
+                Browse _ ->
+                    { pg_ | browse = True }
 
         link p =
             href <| Url.Builder.absolute [ String.fromInt model.project, p ] []
@@ -179,7 +157,7 @@ menubar auth model data mproject =
         (Access.access (o (Data.me auth) Lens.get) data)
     <|
         \user ->
-            div [ class "ui secondary pointing menu" ]
+            div [ class "ui visible vertical inverted sidebar menu" ]
                 [ a
                     [ class "item"
                     , classIf pg.projects "active"
@@ -194,21 +172,14 @@ menubar auth model data mproject =
                 , a
                     [ class "item"
                     , classIf pg.dashboard "active"
-                    , link ""
+                    , link "dashboard"
                     ]
-                    [ text "Dashboard" ]
-                , a [ class "item", classIf pg.create "active", link "create" ]
-                    [ text "Create" ]
-                , a [ class "item", classIf pg.direct "active", link "direct" ]
-                    [ text "Direct" ]
-                , a [ class "item", classIf pg.manage "active", link "manage" ]
-                    [ text "Manage" ]
-                , div [ class "right menu" ]
-                    [ a
-                        [ class "item"
-                        , onClick SignOut
-                        ]
-                        [ text user.name ]
+                    [ i [ class "columns icon" ] []
+                    , text "Dashboard"
+                    ]
+                , a [ class "item", classIf pg.browse "active", link "" ]
+                    [ i [ class "th icon" ] []
+                    , text "Browse"
                     ]
                 ]
 

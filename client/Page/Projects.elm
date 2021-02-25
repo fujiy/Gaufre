@@ -2,20 +2,22 @@ module Page.Projects exposing (..)
 
 import Array
 import Array.Extra as Array
-import Data exposing (Auth, Data)
+import Data exposing (Auth, Data, project)
 import Data.Client as Client
 import Data.Project as Project
+import Dict
 import Firestore exposing (..)
 import Firestore.Access as Access exposing (Accessor)
 import Firestore.Lens as Lens exposing (o)
-import Firestore.Path as Path
+import Firestore.Path as Path exposing (Id)
 import Firestore.Remote exposing (Remote(..))
 import Firestore.Update as Update exposing (Updater)
 import GDrive
-import Html exposing (Html, a, div, i, input, node, text)
+import Html exposing (Html, a, button, div, i, input, node, text)
 import Html.Attributes exposing (class, href, placeholder, style, type_)
 import Html.Events exposing (on, onClick, onInput)
 import Json.Decode as Decode
+import Maybe.Extra as Maybe
 import Util exposing (..)
 
 
@@ -33,7 +35,9 @@ type Msg
     | HideModal
     | Search String
     | SearchResult (List GDrive.FileMeta)
-    | AddProject GDrive.FileMeta
+    | AddProject Bool GDrive.FileMeta
+    | AddProjectProcess Id Project.Process GDrive.FileMeta
+    | None
 
 
 init : Model
@@ -104,13 +108,13 @@ update auth msg model =
                             )
                     )
 
-        ( AddProject file, _ ) ->
+        ( AddProject exists file, _ ) ->
             let
                 projectRef =
-                    Firestore.ref <| Path.fromList [ "projects", file.id ]
+                    Firestore.ref <| Path.fromIds [ "projects", file.id ]
 
                 userRef =
-                    Firestore.ref <| Path.fromList [ "users", auth.uid ]
+                    Firestore.ref <| Path.fromIds [ "users", auth.uid ]
             in
             ( model
             , Update.all
@@ -128,9 +132,7 @@ update auth msg model =
                         Update.Update <|
                             case mp of
                                 Nothing ->
-                                    { name = file.name
-                                    , members = [ userRef ]
-                                    }
+                                    Project.init file userRef
 
                                 Just p ->
                                     { p
@@ -138,6 +140,36 @@ update auth msg model =
                                             userRef :: p.members
                                     }
                 ]
+            , if exists then
+                Cmd.none
+
+              else
+                Cmd.batch <|
+                    flip List.map Project.defaultProcesses <|
+                        \process ->
+                            GDrive.createFolder
+                                auth.token
+                                process.name
+                                [ file.id ]
+                                |> Cmd.map
+                                    (Result.map
+                                        (AddProjectProcess file.id process)
+                                        >> Result.mapError (Debug.log "ERR")
+                                        >> Result.withDefault None
+                                    )
+            )
+
+        ( AddProjectProcess pid process file, _ ) ->
+            ( model
+            , Update.modify
+                (o Data.projects <| Lens.doc pid)
+                Project.desc
+              <|
+                \project ->
+                    { project
+                        | processes =
+                            Dict.insert file.id process project.processes
+                    }
             , Cmd.none
             )
 
@@ -167,7 +199,7 @@ remote r f =
 
 view : Auth -> Model -> Data -> Accessor Data (Html Msg)
 view auth model data =
-    flip Access.map
+    flip Access.andThen
         (Access.access
             (o (Data.myClient auth) <|
                 o Lens.get Client.projects
@@ -183,50 +215,60 @@ view auth model data =
         )
     <|
         \projects ->
-            div []
-                [ div [ class "ui cards", style "margin" "20px" ] <|
-                    List.append
-                        (flip List.map
-                            projects
-                            (\( i, project ) ->
-                                a
-                                    [ class "ui card centered"
-                                    , href <| "/" ++ String.fromInt i
-                                    ]
-                                    [ div [ class "content" ]
-                                        [ -- remote rp <|
-                                          --    \project ->
-                                          div
-                                            [ class
-                                                "center aligned header"
-                                            ]
-                                            [ remote project <| .name >> text ]
-                                        ]
-                                    ]
-                            )
-                        )
-                        [ a
-                            [ class "ui card centered"
-                            , onClick ShowModal
-                            ]
-                            [ div [ class "content" ]
-                                [ div [ class "center aligned header" ]
-                                    [ i
-                                        [ class "plus icon"
-                                        , style "margin" "20px"
-                                        ]
-                                        []
-                                    ]
-                                , div [ class "center aligned header" ]
-                                    [ text "Add Project" ]
-                                ]
-                            ]
+            Access.map
+                (\html ->
+                    div []
+                        [ div [ class "ui cards", style "margin" "20px" ] <|
+                            List.append
+                                (List.map projectCard projects)
+                                [ addProjectCard ]
+                        , html
                         ]
-                , searchModal auth data model
+                )
+            <|
+                searchModal auth data model
+
+
+projectCard ( i, rp ) =
+    a
+        [ class "ui card centered"
+        , href <|
+            "/"
+                ++ String.fromInt i
+                ++ "/dashboard"
+        ]
+        [ div [ class "content" ]
+            [ remote rp <|
+                \project ->
+                    div
+                        [ class
+                            "center aligned header"
+                        ]
+                        [ text project.name ]
+            ]
+        ]
+
+
+addProjectCard =
+    a
+        [ class "ui card centered"
+        , onClick ShowModal
+        ]
+        [ div [ class "content" ]
+            [ div [ class "center aligned header" ]
+                [ i
+                    [ class "plus icon"
+                    , style "margin" "20px"
+                    ]
+                    []
                 ]
+            , div [ class "center aligned header" ]
+                [ text "プロジェクトを追加" ]
+            ]
+        ]
 
 
-searchModal : Auth -> Data -> Model -> Html Msg
+searchModal : Auth -> Data -> Model -> Accessor Data (Html Msg)
 searchModal auth data model =
     let
         showModal =
@@ -237,43 +279,98 @@ searchModal auth data model =
                 _ ->
                     False
     in
-    node "ui-modal"
-        [ boolAttr "show" showModal
-        , class "ui tiny modal"
-        , on "hide" <| Decode.succeed HideModal
-        ]
-        [ div [ class "header" ]
-            [ text "Google Drive内のフォルダからプロジェクトフォルダを選択" ]
-        , case model of
+    Access.map
+        (\html ->
+            node "ui-modal"
+                [ boolAttr "show" showModal
+                , class "ui tiny modal"
+                , on "hide" <| Decode.succeed HideModal
+                ]
+                [ div [ class "header" ]
+                    [ text "Google Drive内からプロジェクトフォルダを選択" ]
+                , html
+                ]
+        )
+    <|
+        case model of
             SearchFolder { result, loading } ->
-                div [ class "content" ]
-                    [ div
-                        [ class "ui fluid search"
-                        , classIf loading "loading"
-                        ]
-                        [ div [ class "ui icon fluid input" ]
-                            [ input
-                                [ class "propt"
-                                , type_ "text"
-                                , placeholder "Folder names..."
-                                , onInput Search
+                Access.map
+                    (\pl ->
+                        div [ class "content" ]
+                            [ div
+                                [ class "ui fluid search"
+                                , classIf loading "loading"
                                 ]
-                                []
-                            , i [ class "search icon" ] []
-                            ]
-                        ]
-                    , div [ class "ui link items" ] <|
-                        flip List.map result <|
-                            \file ->
-                                div [ class "item" ]
-                                    [ a
-                                        [ class "header"
-                                        , onClick <| AddProject file
+                                [ div [ class "ui icon fluid input" ]
+                                    [ input
+                                        [ class "propt"
+                                        , type_ "text"
+                                        , placeholder "Folder names..."
+                                        , onInput Search
                                         ]
-                                        [ text file.name ]
+                                        []
+                                    , i [ class "search icon" ] []
                                     ]
-                    ]
+                                ]
+                            , pl
+                            ]
+                    )
+                <|
+                    projectList auth data result
 
             _ ->
-                text ""
-        ]
+                Access.success <| text ""
+
+
+projectList : Auth -> Data -> List GDrive.FileMeta -> Accessor Data (Html Msg)
+projectList auth data files =
+    Access.maps (div [ class "ui divided items" ]) <|
+        flip List.map files <|
+            \file ->
+                Access.accessMapMaybe
+                    (o Data.projects <|
+                        o (Lens.doc file.id) Lens.get
+                    )
+                    data
+                <|
+                    \mproject ->
+                        let
+                            userRef =
+                                Firestore.ref <|
+                                    Path.fromIds [ "users", auth.uid ]
+
+                            status =
+                                Maybe.map
+                                    (\p -> List.member userRef p.members)
+                                    mproject
+                        in
+                        div [ class "item" ]
+                            [ div [ class "middle aligned content" ]
+                                [ Html.h4 [ class "ui header" ]
+                                    [ text file.name ]
+                                , button
+                                    [ class
+                                        "ui right floated basic primary button"
+                                    , classIf (status == Just True)
+                                        "disabled"
+                                    , onClick <|
+                                        AddProject (Maybe.isJust status) file
+                                    ]
+                                  <|
+                                    case status of
+                                        Nothing ->
+                                            [ i [ class "plus icon" ] []
+                                            , text "新しく始める"
+                                            ]
+
+                                        Just False ->
+                                            [ i [ class "sign-in icon" ] []
+                                            , text "参加する"
+                                            ]
+
+                                        Just True ->
+                                            [ i [ class "check icon" ] []
+                                            , text "参加済み"
+                                            ]
+                                ]
+                            ]

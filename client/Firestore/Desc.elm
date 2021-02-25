@@ -195,7 +195,7 @@ reference =
             Encode.object [ ( "__path__", path.encoder p ) ]
         )
         (Decode.field "path" Decode.string
-            |> Decode.map (String.split "/" >> Path.fromList >> Reference)
+            |> Decode.map (String.split "/" >> Path.fromIds >> Reference)
         )
 
 

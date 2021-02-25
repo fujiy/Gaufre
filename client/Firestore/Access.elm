@@ -121,6 +121,11 @@ array =
     Array.toList >> list >> map Array.fromList
 
 
+maps : (List a -> b) -> List (Accessor r a) -> Accessor r b
+maps f =
+    map f << list
+
+
 
 -- maybe : Maybe (Accessor r a) -> Accessor (Maybe a)
 -- maybe m =
@@ -144,6 +149,16 @@ fromJust =
 access : Lens a r -> a -> Accessor a r
 access (Lens acc _) a =
     acc a
+
+
+accessMap : Lens a r -> a -> (r -> b) -> Accessor a b
+accessMap (Lens acc _) a f =
+    map f <| acc a
+
+
+accessMapMaybe : Lens a r -> a -> (Maybe r -> b) -> Accessor a b
+accessMapMaybe (Lens acc _) a f =
+    map f <| maybe <| acc a
 
 
 thenAccess : Lens a r -> Accessor d a -> Accessor d r

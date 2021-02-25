@@ -28,6 +28,14 @@ type alias Work =
     }
 
 
+type alias Reference =
+    Firestore.Reference () Work
+
+
+type alias Collection =
+    Firestore.Collection () Work
+
+
 desc : DocumentDesc () Work
 desc =
     Desc.document Work <|
