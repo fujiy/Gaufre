@@ -3,10 +3,12 @@ module Data.Project exposing (..)
 import Data.User as User
 import Data.Work as Work
 import Dict exposing (Dict)
+import Dict.Extra as Dict
 import Firestore exposing (..)
 import Firestore.Desc as Desc exposing (Desc, DocumentDesc)
 import Firestore.Path exposing (Id)
 import GDrive
+import Maybe.Extra as Maybe
 
 
 type alias Project =
@@ -43,10 +45,43 @@ init file user =
     }
 
 
+makePartName : Int -> String
+makePartName i =
+    "カット" ++ String.fromInt i
 
--- addPart : Project -> Project
--- addPart p =
---     {p | parts }
+
+addPart : Project -> Project
+addPart p =
+    let
+        last =
+            Dict.values p.parts
+                |> List.sortBy (.order >> negate)
+                |> List.head
+                |> Maybe.unwrap 0 .order
+
+        try id name =
+            if Dict.member (String.fromInt id) p.parts then
+                try (id + 1) name
+
+            else if
+                Dict.any
+                    (\_ part -> part.name == makePartName name)
+                    p.parts
+            then
+                try id (name + 1)
+
+            else
+                ( String.fromInt id
+                , { name = makePartName name
+                  , order = last + 1
+                  , parent = Nothing
+                  }
+                )
+
+        ( newId, newPart ) =
+            try (Dict.size p.parts) (Dict.size p.parts)
+    in
+    { p | parts = Dict.insert newId newPart p.parts }
 
 
 desc : DocumentDesc Sub Project
@@ -103,7 +138,7 @@ type alias PartId =
 type alias Part =
     { name : String
     , order : Float
-    , parent : PartId
+    , parent : Maybe PartId
     }
 
 
@@ -112,4 +147,4 @@ partDesc =
     Desc.object Part <|
         Desc.field "name" .name Desc.string
             >> Desc.field "order" .order Desc.float
-            >> Desc.field "parent" .parent Desc.string
+            >> Desc.option "parent" .parent Desc.string

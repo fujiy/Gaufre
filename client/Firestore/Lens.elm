@@ -1,8 +1,10 @@
 module Firestore.Lens exposing (..)
 
 import Array exposing (Array)
+import Browser.Navigation exposing (load)
 import Dict
 import Firestore.Access as Access
+import Firestore.Desc exposing (documentWithSubs, paths)
 import Firestore.Internal exposing (..)
 import Firestore.Path as Path exposing (Id, Path)
 import Firestore.Remote as Remote exposing (Remote(..))
@@ -55,7 +57,13 @@ o (Lens af uf) (Lens ag ug) =
                                     { value = a
                                     , updates = Path.empty
                                     , requests = paths
-                                    , afterwards = updater ()
+                                    , afterwards =
+                                        case rb of
+                                            Loading ->
+                                                updater ()
+
+                                            _ ->
+                                                noUpdater
                                     }
 
                                 Just b ->
@@ -89,8 +97,8 @@ fromIso iso =
     lens iso.get (\b _ -> iso.reverseGet b)
 
 
-composeIso : Iso a b -> Lens b c -> Lens a c
-composeIso iso (Lens af uf_) =
+isoCompose : Iso a b -> Lens b c -> Lens a c
+isoCompose iso (Lens af uf_) =
     Lens (iso.get >> af >> coerce)
         (\u c ->
             let
@@ -111,8 +119,8 @@ composeIso iso (Lens af uf_) =
         )
 
 
-isoCompose : Lens a b -> Iso b c -> Lens a c
-isoCompose (Lens af uf) iso =
+composeIso : Lens a b -> Iso b c -> Lens a c
+composeIso (Lens af uf) iso =
     Lens (af >> Access.map iso.get)
         (\u c -> uf u <| iso.reverseGet c)
 
@@ -122,47 +130,15 @@ isoCompose (Lens af uf) iso =
 
 
 list : Lens a b -> Lens (List a) (List b)
-list (Lens af uf_) =
+list (Lens af uf) =
     Lens
         (List.map af >> Access.list >> coerce)
-    <|
-        \u bs ->
-            let
-                listupd uf =
-                    Updater <|
-                        \xs ->
-                            List.foldr
-                                (\( a, b ) upds ->
-                                    let
-                                        upd =
-                                            runUpdater (uf u b) a
-                                    in
-                                    { value = upd.value :: upds.value
-                                    , updates =
-                                        Path.merge
-                                            mergeUpdate
-                                            upd.updates
-                                            upds.updates
-                                    , requests =
-                                        Path.append upd.requests upds.requests
-                                    , afterwards =
-                                        Update.both upds.afterwards <|
-                                            listupd uf
-                                    }
-                                )
-                                { value = []
-                                , updates = Path.empty
-                                , requests = Path.empty
-                                , afterwards = noUpdater
-                                }
-                                (List.zip xs bs)
-            in
-            listupd uf_
+        (\u -> Update.list (uf u))
 
 
 array : Lens a b -> Lens (Array a) (Array b)
 array l =
-    composeIso (Iso.reverse list2array) <| isoCompose (list l) list2array
+    isoCompose (reverse list2array) <| composeIso (list l) list2array
 
 
 atArray : Int -> Lens (Array a) a
@@ -273,6 +249,20 @@ get =
         )
 
 
+getRemote : Lens (Document s r) (Remote r)
+getRemote =
+    Lens (\(Document _ r) -> Accessor (Path.rootItem ()) (UpToDate r))
+        (\u rr ->
+            Updater <|
+                \(Document s _) ->
+                    { value = Document s rr
+                    , updates = Path.rootItem u
+                    , requests = Path.empty
+                    , afterwards = noUpdater
+                    }
+        )
+
+
 
 -- Reference
 
@@ -317,14 +307,113 @@ dereferer l =
                     ( ids_, fail <| Path.fromIds ids )
 
 
-deref : Dereferer d (Document s r) -> Reference s r -> Lens d (Document s r)
-deref (Dereferer f) (Reference path) =
-    case f <| Path.toIds path of
-        ( [], l ) ->
-            l
+derefs :
+    Dereferer d (Document s r)
+    -> Lens d (List (Reference s r))
+    -> Lens d (List (Document s r))
+derefs drf (Lens acc _) =
+    Lens
+        (\d ->
+            let
+                (Accessor paths rrs) =
+                    acc d
+            in
+            Remote.traverse List.map (always []) rrs
+                |> List.map
+                    (\rr -> derefAccessor drf (Accessor paths rr) d)
+                |> Access.list
+        )
+        (\u docs ->
+            List.indexedMap Tuple.pair docs
+                |> List.map
+                    (\( i, dc ) ->
+                        derefUpdater drf
+                            (acc
+                                >> Access.map (List.getAt i)
+                                >> Access.fromJust
+                            )
+                            u
+                            dc
+                    )
+                |> Update.all
+        )
 
-        ( ids, l ) ->
-            fail <| Path.fromIds ids
+
+derefAccessor :
+    Dereferer d (Document s r)
+    -> Accessor d (Reference s r)
+    -> d
+    -> Accessor d (Document s r)
+derefAccessor (Dereferer f) (Accessor paths rr) d =
+    let
+        (Accessor dpaths rdoc) =
+            Remote.map
+                (\(Reference path) ->
+                    case f <| Path.toIds path of
+                        ( [], Lens acc_ _ ) ->
+                            acc_ d
+
+                        _ ->
+                            Access.failure
+                )
+                rr
+                |> Access.unremote
+    in
+    Accessor (Path.append paths dpaths) rdoc
+
+
+derefUpdater :
+    Dereferer d (Document s r)
+    -> (d -> Accessor d (Reference s r))
+    -> Update
+    -> Document s r
+    -> Updater d
+derefUpdater (Dereferer f) acc u dc =
+    Updater <|
+        \d ->
+            let
+                (Accessor paths rr) =
+                    acc d
+            in
+            case Remote.toMaybe rr of
+                Nothing ->
+                    { value = d
+                    , updates = Path.empty
+                    , requests = paths
+                    , afterwards =
+                        case rr of
+                            Loading ->
+                                derefUpdater (Dereferer f) acc u dc
+
+                            _ ->
+                                noUpdater
+                    }
+
+                Just (Reference path) ->
+                    case f <| Path.toIds path of
+                        ( [], Lens _ upd_ ) ->
+                            let
+                                upds =
+                                    runUpdater (upd_ u dc) d
+                            in
+                            { upds
+                                | requests =
+                                    Path.append paths
+                                        upds.requests
+                            }
+
+                        _ ->
+                            noUpdates d
+
+
+deref :
+    Dereferer d (Document s r)
+    -> Lens d (Reference s r)
+    -> Lens d (Document s r)
+deref drf (Lens acc _) =
+    Lens
+        (\d -> derefAccessor drf (acc d) d)
+        (derefUpdater drf acc)
 
 
 fail : Path -> Lens a b
@@ -333,17 +422,12 @@ fail path =
         (\_ _ -> noUpdater)
 
 
-derefAndAccess :
-    Dereferer d (Document s r)
-    -> d
-    -> Reference s r
-    -> Accessor d (Document s r)
-derefAndAccess drf d r =
-    Access.access (deref drf r) d
-
-
 
 -- Iso
+
+
+reverse =
+    Iso.reverse
 
 
 list2array : Iso (List a) (Array a)

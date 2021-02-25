@@ -97,3 +97,19 @@ andThen2 f ra rb =
 unmaybe : Remote (Maybe a) -> Remote a
 unmaybe =
     andThen fromMaybe
+
+
+traverse : ((a -> Remote a) -> t -> r) -> (Remote x -> r) -> Remote t -> r
+traverse f default rx =
+    case rx of
+        Loading ->
+            default Loading
+
+        Failure ->
+            default Failure
+
+        Committing x ->
+            f Committing x
+
+        UpToDate x ->
+            f UpToDate x

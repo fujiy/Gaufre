@@ -372,3 +372,16 @@ field name getter d (Field m) =
         , decoder =
             Decode.map2 identity m.decoder (Decode.field name d.decoder)
         }
+
+
+option : String -> (r -> Maybe a) -> Desc a -> Field (Maybe a -> l) r -> Field l r
+option name getter d (Field m) =
+    Field
+        { encoders =
+            ( name, getter >> Maybe.unwrap Encode.null d.encoder )
+                :: m.encoders
+        , decoder =
+            Decode.map2 identity
+                m.decoder
+                (Decode.maybe <| Decode.field name d.decoder)
+        }

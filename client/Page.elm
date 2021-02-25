@@ -65,16 +65,27 @@ urlChanged model url =
 
 
 update : Auth -> Msg -> Model -> ( Model, Updater Data, Cmd Msg )
-update auth msg model =
-    case ( msg, model.page ) of
-        ( ProjectsMsg m, Projects pm ) ->
+update auth message model =
+    case ( message, model.page ) of
+        ( ProjectsMsg msg, Projects m ) ->
             let
                 ( m_, upd, cmd ) =
-                    Projects.update auth m pm
+                    Projects.update auth msg m
             in
             ( { model | page = Projects m_ }
             , upd
             , Cmd.map ProjectsMsg cmd
+            )
+
+        ( BrowseMsg msg, Browse m ) ->
+            let
+                ( m_, upd, cmd ) =
+                    Browse.update auth msg m <|
+                        Data.currentProject auth model.project
+            in
+            ( { model | page = Browse m_ }
+            , upd
+            , Cmd.map BrowseMsg cmd
             )
 
         _ ->
@@ -86,14 +97,8 @@ view auth model data =
     let
         project =
             Access.access
-                (o (Data.myClient auth) <|
-                    o Lens.get <|
-                        o Client.projects <|
-                            Lens.atArray model.project
-                )
+                (o (Data.currentProject auth model.project) Lens.get)
                 data
-                |> Access.andThen (Lens.derefAndAccess Data.project data)
-                |> Access.thenAccess Lens.get
                 |> Access.maybe
     in
     Access.map (Browser.Document "Gaufre") <|

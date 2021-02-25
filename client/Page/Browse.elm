@@ -2,9 +2,10 @@ module Page.Browse exposing (..)
 
 import Data exposing (Auth, Data)
 import Data.Client exposing (Client)
-import Data.Project exposing (Process, Project)
+import Data.Project as Project exposing (Process, Project)
 import Data.User exposing (User)
 import Dict
+import Firestore exposing (Lens)
 import Firestore.Access as Access exposing (Accessor)
 import Firestore.Update as Update exposing (Updater)
 import Html exposing (Html, a, button, div, i, span, table, tbody, td, text, th, thead, tr)
@@ -26,9 +27,19 @@ type Msg
     = AddPart
 
 
-update : Auth -> Msg -> Model -> ( Model, Updater Data, Cmd Msg )
-update auth msg model =
-    ( model, Update.none, Cmd.none )
+update :
+    Auth
+    -> Msg
+    -> Model
+    -> Lens Data Project.Document
+    -> ( Model, Updater Data, Cmd Msg )
+update auth msg model projectLens =
+    case msg of
+        AddPart ->
+            ( model
+            , Update.modify projectLens Project.desc Project.addPart
+            , Cmd.none
+            )
 
 
 view : Auth -> Model -> Data -> Project -> Accessor Data (Html Msg)
@@ -37,6 +48,10 @@ view auth model data project =
         processes =
             Dict.toList project.processes
                 |> List.sortBy (\( _, p ) -> p.order)
+
+        parts =
+            Dict.toList project.parts
+                |> List.sortBy (\( _, p ) -> p.order)
     in
     Access.success <|
         table [ class "ui celed table" ]
@@ -44,11 +59,15 @@ view auth model data project =
                 [ tr [] <|
                     th [] []
                         :: (flip List.map processes <|
-                                \( pid, process ) ->
+                                \( id, process ) ->
                                     th [] [ text process.name ]
                            )
                 ]
-            , tbody []
-                [ tr [] [ td [] [ Button.add AddPart ] ]
-                ]
+            , tbody [] <|
+                List.map
+                    (\( id, part ) ->
+                        tr [] [ td [] [ text part.name ] ]
+                    )
+                    parts
+                    ++ [ tr [] [ td [] [ Button.add AddPart ] ] ]
             ]

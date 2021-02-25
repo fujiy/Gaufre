@@ -2,7 +2,7 @@ module Data exposing (..)
 
 import Array
 import Data.Client as Client
-import Data.Project as Project
+import Data.Project as Project exposing (Project)
 import Data.User as User
 import Firestore exposing (..)
 import Firestore.Desc as Desc exposing (FirestoreDesc)
@@ -48,6 +48,23 @@ myClient auth =
 me : Auth -> Lens Data User.Document
 me auth =
     o users <| Lens.doc auth.uid
+
+
+myProjects : Auth -> Lens Data (List Project.Document)
+myProjects auth =
+    Lens.derefs project <|
+        o (myClient auth) <|
+            o Lens.get <|
+                Lens.composeIso Client.projects (Lens.reverse Lens.list2array)
+
+
+currentProject : Auth -> Int -> Lens Data Project.Document
+currentProject auth i =
+    Lens.deref project <|
+        o (myClient auth) <|
+            o Lens.get <|
+                o Client.projects <|
+                    Lens.atArray i
 
 
 project : Lens.Dereferer Data Project.Document

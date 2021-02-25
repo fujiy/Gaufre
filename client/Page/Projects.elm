@@ -201,16 +201,8 @@ view : Auth -> Model -> Data -> Accessor Data (Html Msg)
 view auth model data =
     flip Access.andThen
         (Access.access
-            (o (Data.myClient auth) <|
-                o Lens.get Client.projects
-            )
+            (o (Data.myProjects auth) <| Lens.list Lens.getRemote)
             data
-            |> Access.map Array.toList
-            |> Access.for
-                (Lens.derefAndAccess Data.project data
-                    >> Access.thenAccess Lens.get
-                    >> Access.remote
-                )
             |> Access.map (List.indexedMap Tuple.pair)
         )
     <|

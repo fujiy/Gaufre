@@ -4,6 +4,7 @@ import Firestore.Desc exposing (DocumentDesc(..))
 import Firestore.Internal as Internal exposing (..)
 import Firestore.Path as Path
 import Firestore.Remote as Remote exposing (Remote(..))
+import List.Extra as List
 import Maybe.Extra as Maybe
 import Util exposing (..)
 
@@ -131,3 +132,33 @@ both (Updater f) (Updater g) =
             , requests = Path.append ux.requests uy.requests
             , afterwards = both ux.afterwards uy.afterwards
             }
+
+
+list : (b -> Updater a) -> List b -> Updater (List a)
+list updater bs =
+    Updater <|
+        \xs ->
+            List.foldr
+                (\( a, b ) upds ->
+                    let
+                        upd =
+                            runUpdater (updater b) a
+                    in
+                    { value = upd.value :: upds.value
+                    , updates =
+                        Path.merge
+                            mergeUpdate
+                            upd.updates
+                            upds.updates
+                    , requests =
+                        Path.append upd.requests upds.requests
+                    , afterwards =
+                        both upds.afterwards <| list updater bs
+                    }
+                )
+                { value = []
+                , updates = Path.empty
+                , requests = Path.empty
+                , afterwards = noUpdater
+                }
+                (List.zip xs bs)
