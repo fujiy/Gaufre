@@ -7,6 +7,7 @@ import Firestore.Path as Path exposing (Path, PathMap, Paths)
 import Firestore.Remote exposing (Remote(..))
 import Json.Decode as Decode exposing (Decoder)
 import Json.Encode as Encode exposing (Value)
+import List.Extra as List
 import Maybe.Extra as Maybe
 import Monocle.Iso exposing (Iso)
 import Util exposing (..)
@@ -336,6 +337,24 @@ lazy df =
     Desc (\a -> (df ()).encoder a) (Decode.lazy (\_ -> (df ()).decoder))
 
 
+enum : List ( String, a ) -> Desc a
+enum xs =
+    Desc
+        (\a ->
+            List.find (\( _, a_ ) -> a == a_) xs
+                |> Maybe.unwrap Encode.null (\( s, _ ) -> Encode.string s)
+        )
+        (Decode.string
+            |> Decode.andThen
+                (\s ->
+                    List.find (\( s_, _ ) -> s == s_) xs
+                        |> Maybe.unwrap
+                            (Decode.fail "no matching enum member")
+                            (\( _, a ) -> Decode.succeed a)
+                )
+        )
+
+
 
 -- Objects
 
@@ -374,7 +393,12 @@ field name getter d (Field m) =
         }
 
 
-option : String -> (r -> Maybe a) -> Desc a -> Field (Maybe a -> l) r -> Field l r
+option :
+    String
+    -> (r -> Maybe a)
+    -> Desc a
+    -> Field (Maybe a -> l) r
+    -> Field l r
 option name getter d (Field m) =
     Field
         { encoders =
@@ -384,4 +408,26 @@ option name getter d (Field m) =
             Decode.map2 identity
                 m.decoder
                 (Decode.maybe <| Decode.field name d.decoder)
+        }
+
+
+optionWithDefault :
+    String
+    -> (r -> a)
+    -> a
+    -> Desc a
+    -> Field (a -> l) r
+    -> Field l r
+optionWithDefault name getter default d (Field m) =
+    Field
+        { encoders =
+            ( name, getter >> d.encoder )
+                :: m.encoders
+        , decoder =
+            Decode.map2 identity
+                m.decoder
+                (Decode.map (Maybe.withDefault default) <|
+                    Decode.maybe <|
+                        Decode.field name d.decoder
+                )
         }

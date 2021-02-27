@@ -17,6 +17,10 @@ type alias Part =
     String
 
 
+type alias WorkId =
+    String
+
+
 type Status
     = NotAssigned
     | Waiting
@@ -30,6 +34,7 @@ type alias Work =
     , process : ProcessId
     , belongsTo : List PartId
     , staffs : List User.Reference
+    , status : Status
 
     -- , reviewers : List (Reference User)
     -- , status : Status
@@ -54,6 +59,7 @@ init name process part =
     , process = process
     , belongsTo = [ part ]
     , staffs = []
+    , status = NotAssigned
     }
 
 
@@ -64,3 +70,34 @@ desc =
             >> Desc.field "process" .process Desc.string
             >> Desc.field "belongsTo" .belongsTo (Desc.list Desc.string)
             >> Desc.field "staffs" .staffs (Desc.list Desc.reference)
+            >> Desc.field "status"
+                .status
+                (Desc.enum
+                    [ ( "NotAssigned", NotAssigned )
+                    , ( "Waiting", Waiting )
+                    , ( "InProgress", InProgress )
+                    , ( "Reviewing", Reviewing )
+                    , ( "Complete", Complete )
+                    ]
+                )
+
+
+iconClass : Status -> String
+iconClass status =
+    (case status of
+        NotAssigned ->
+            "user times"
+
+        Waiting ->
+            "hourglass outline"
+
+        InProgress ->
+            "paint brush"
+
+        Reviewing ->
+            "eye"
+
+        Complete ->
+            "check"
+    )
+        ++ " icon"

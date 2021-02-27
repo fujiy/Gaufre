@@ -4,6 +4,8 @@ import Array exposing (Array)
 import Array.Extra as Array
 import Html exposing (Attribute)
 import Html.Attributes exposing (attribute, class)
+import Html.Events as Events exposing (stopPropagationOn)
+import Json.Decode as Decode
 
 
 uncurry : (a -> b -> c) -> ( a, b ) -> c
@@ -62,3 +64,23 @@ classIf cond cls =
 
     else
         class ""
+
+
+onMouseDownStop : msg -> Attribute msg
+onMouseDownStop msg =
+    stopPropagationOn "mousedown" <| Decode.succeed ( msg, True )
+
+
+onDragEnter : msg -> Attribute msg
+onDragEnter msg =
+    Events.on "mouseenter" <|
+        Decode.andThen
+            (\buttons ->
+                if buttons == 1 then
+                    Decode.succeed msg
+
+                else
+                    Decode.fail "button unpressed"
+            )
+        <|
+            Decode.field "buttons" Decode.int
