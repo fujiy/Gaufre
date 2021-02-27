@@ -7,6 +7,7 @@ import Data.User as User
 import Firestore exposing (..)
 import Firestore.Desc as Desc exposing (FirestoreDesc)
 import Firestore.Lens as Lens exposing (o)
+import Firestore.Path exposing (Id)
 import Firestore.Update as Update
 import Maybe.Extra as Maybe
 
@@ -52,7 +53,7 @@ me auth =
 
 myProjects : Auth -> Lens Data (List Project.Document)
 myProjects auth =
-    Lens.derefs project <|
+    Lens.derefs projectDeref <|
         o (myClient auth) <|
             o Lens.get <|
                 Lens.composeIso Client.projects (Lens.reverse Lens.list2array)
@@ -60,15 +61,20 @@ myProjects auth =
 
 currentProject : Auth -> Int -> Lens Data Project.Document
 currentProject auth i =
-    Lens.deref project <|
+    Lens.deref projectDeref <|
         o (myClient auth) <|
             o Lens.get <|
                 o Client.projects <|
                     Lens.atArray i
 
 
-project : Lens.Dereferer Data Project.Document
-project =
+project : Id -> Lens Data Project.Document
+project id =
+    o projects <| Lens.doc id
+
+
+projectDeref : Lens.Dereferer Data Project.Document
+projectDeref =
     Lens.dereferer projects
 
 

@@ -5,6 +5,10 @@ import Firestore exposing (..)
 import Firestore.Desc as Desc exposing (DocumentDesc)
 
 
+type alias Id =
+    String
+
+
 type alias ProcessId =
     String
 
@@ -30,7 +34,8 @@ type Status
 
 
 type alias Work =
-    { name : String
+    { id : Id
+    , name : String
     , process : ProcessId
     , belongsTo : List PartId
     , staffs : List User.Reference
@@ -53,9 +58,10 @@ type alias Document =
     Firestore.Document () Work
 
 
-init : String -> ProcessId -> PartId -> Work
-init name process part =
-    { name = name
+init : Id -> String -> ProcessId -> PartId -> Work
+init id name process part =
+    { id = id
+    , name = name
     , process = process
     , belongsTo = [ part ]
     , staffs = []
@@ -65,7 +71,7 @@ init name process part =
 
 desc : DocumentDesc () Work
 desc =
-    Desc.document Work <|
+    Desc.documentWithId Work <|
         Desc.field "name" .name Desc.string
             >> Desc.field "process" .process Desc.string
             >> Desc.field "belongsTo" .belongsTo (Desc.list Desc.string)

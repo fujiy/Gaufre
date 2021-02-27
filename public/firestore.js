@@ -22,7 +22,8 @@ function initialize(app) {
     }
 
     function makeDoc(doc) {
-        return {status: doc.data() ? "uptodate" : "failure",
+        return {id: doc.id,
+                status: doc.data() ? "uptodate" : "failure",
                 value: doc.data() || null}
     }
 

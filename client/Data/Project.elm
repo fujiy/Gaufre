@@ -13,7 +13,8 @@ import Maybe.Extra as Maybe
 
 
 type alias Project =
-    { name : String
+    { id : String
+    , name : String
     , members : List User.Reference
     , processes : Dict ProcessId Process
     , parts : Dict ProcessId Part
@@ -49,7 +50,8 @@ work id =
 
 init : GDrive.FileMeta -> User.Reference -> Project
 init file user =
-    { name = file.name
+    { id = file.id
+    , name = file.name
     , members = [ user ]
     , processes = Dict.empty
     , parts = Dict.empty
@@ -94,7 +96,7 @@ newPart p =
 
 desc : DocumentDesc Sub Project
 desc =
-    Desc.documentWithSubs
+    Desc.documentWithIdAndSubs
         Project
         (Desc.field "name" .name Desc.string
             >> Desc.field "members"

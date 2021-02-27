@@ -3,7 +3,7 @@ module Firestore.Desc exposing (..)
 import Array exposing (Array)
 import Dict exposing (Dict)
 import Firestore.Internal exposing (..)
-import Firestore.Path as Path exposing (Path, PathMap, Paths)
+import Firestore.Path as Path exposing (Id, Path, PathMap, Paths)
 import Firestore.Remote exposing (Remote(..))
 import Json.Decode as Decode exposing (Decoder)
 import Json.Encode as Encode exposing (Value)
@@ -85,12 +85,17 @@ firestore constr rf =
     FirestoreDesc c
 
 
-document :
-    c
+document : c -> (Field c r -> Field r r) -> DocumentDesc () r
+document constr =
+    documentWithId <| \_ -> constr
+
+
+documentWithId :
+    (Id -> c)
     -> (Field c r -> Field r r)
     -> DocumentDesc () r
-document constr f =
-    documentWithSubs constr f () identity
+documentWithId constr f =
+    documentWithIdAndSubs constr f () identity
 
 
 documentWithSubs :
@@ -99,7 +104,17 @@ documentWithSubs :
     -> sc
     -> (CollectionDesc sc s -> CollectionDesc s s)
     -> DocumentDesc s r
-documentWithSubs rconstr rf sconstr sf =
+documentWithSubs constr =
+    documentWithIdAndSubs <| \_ -> constr
+
+
+documentWithIdAndSubs :
+    (Id -> rc)
+    -> (Field rc r -> Field r r)
+    -> sc
+    -> (CollectionDesc sc s -> CollectionDesc s s)
+    -> DocumentDesc s r
+documentWithIdAndSubs rconstr rf sconstr sf =
     let
         (CollectionDesc cd) =
             sf <|
@@ -108,25 +123,25 @@ documentWithSubs rconstr rf sconstr sf =
                     , empty = sconstr
                     }
 
-        (Field fd) =
-            rf <|
-                Field
-                    { encoders = []
-                    , decoder = Decode.succeed rconstr
-                    }
-
-        desc =
-            remote <|
-                { encoder =
-                    \r ->
-                        Encode.object <|
-                            List.map (\( name, f ) -> ( name, f r )) fd.encoders
-                , decoder = fd.decoder
-                }
+        fld id =
+            unField <|
+                rf <|
+                    Field
+                        { encoders = []
+                        , decoder = Decode.succeed <| rconstr id
+                        }
     in
     DocumentDesc
-        { encoder = desc.encoder
-        , decoder = desc.decoder
+        { encoder =
+            encodeRemote <|
+                \r ->
+                    Encode.object <|
+                        List.map (\( name, f ) -> ( name, f r ))
+                            (fld "").encoders
+        , decoder =
+            Decode.andThen
+                (\id -> decodeRemote (fld id).decoder)
+                (Decode.field "id" Decode.string)
         , applier =
             \pv ->
                 if Path.isEmpty pv then
@@ -202,57 +217,62 @@ reference =
 
 remote : Desc a -> Desc (Remote a)
 remote d =
-    { encoder =
-        \ra ->
-            let
-                ( status, v ) =
-                    case ra of
-                        Loading ->
-                            ( "loading", Encode.null )
+    Desc (encodeRemote d.encoder) (decodeRemote d.decoder)
 
-                        Failure ->
-                            ( "failure", Encode.null )
 
-                        Committing a ->
-                            ( "committing", d.encoder a )
+encodeRemote : Encoder a -> Encoder (Remote a)
+encodeRemote enc ra =
+    let
+        ( status, v ) =
+            case ra of
+                Loading ->
+                    ( "loading", Encode.null )
 
-                        UpToDate a ->
-                            ( "uptodate", d.encoder a )
-            in
-            Encode.object
-                [ ( "status", Encode.string status )
-                , ( "value", v )
-                ]
-    , decoder =
-        Decode.andThen
-            (\t ->
-                case t of
-                    ( "loading", _ ) ->
-                        Decode.succeed Loading
+                Failure ->
+                    ( "failure", Encode.null )
 
-                    ( "failure", _ ) ->
-                        Decode.succeed Failure
+                Committing a ->
+                    ( "committing", enc a )
 
-                    ( "committing", Nothing ) ->
-                        Decode.fail "no value"
+                UpToDate a ->
+                    ( "uptodate", enc a )
+    in
+    Encode.object
+        [ ( "status", Encode.string status )
+        , ( "value", v )
+        ]
 
-                    ( "committing", Just a ) ->
-                        Decode.succeed <| Committing a
 
-                    ( "uptodate", Nothing ) ->
-                        Decode.fail "no value"
+decodeRemote : Decoder a -> Decoder (Remote a)
+decodeRemote dec =
+    Decode.andThen
+        (\t ->
+            case t of
+                ( "loading", _ ) ->
+                    Decode.succeed Loading
 
-                    ( "uptodate", Just a ) ->
-                        Decode.succeed <| UpToDate a
+                ( "failure", _ ) ->
+                    Decode.succeed Failure
 
-                    _ ->
-                        Decode.fail "unknown state"
-            )
-        <|
-            Decode.map2 Tuple.pair
-                (Decode.field "status" Decode.string)
-                (Decode.field "value" <| Decode.nullable d.decoder)
-    }
+                ( "committing", Nothing ) ->
+                    Decode.fail "no value"
+
+                ( "committing", Just a ) ->
+                    Decode.succeed <| Committing a
+
+                ( "uptodate", Nothing ) ->
+                    Decode.fail "no value"
+
+                ( "uptodate", Just a ) ->
+                    Decode.succeed <| UpToDate a
+
+                _ ->
+                    Decode.fail "unknown state"
+        )
+    <|
+        Decode.map2 Tuple.pair
+            (Decode.field "status" Decode.string)
+            (Decode.field "value" <| Decode.nullable dec)
 
 
 pathMap : Desc a -> Desc (PathMap a)

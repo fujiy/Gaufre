@@ -73,7 +73,7 @@ update auth msg model projectLens =
             , Update.set
                 (o projectLens <| Project.work folder.id)
                 Work.desc
-                (Work.init folder.name processId partId)
+                (Work.init folder.id folder.name processId partId)
             , Cmd.none
             )
 
@@ -112,10 +112,9 @@ view :
     Auth
     -> Model
     -> Data
-    -> Lens Data Project.Document
     -> Project
     -> Accessor Data (Html Msg)
-view auth model data projectLens project =
+view auth model data project =
     let
         processes =
             Dict.toList project.processes
@@ -127,7 +126,7 @@ view auth model data projectLens project =
     in
     flip Access.map
         (Access.access
-            (o projectLens <| o Project.works Lens.getAll)
+            (o (Data.project project.id) <| o Project.works Lens.getAll)
             data
         )
     <|
@@ -142,7 +141,7 @@ view auth model data projectLens project =
                                         List.map
                                             (\partId ->
                                                 ( work.process
-                                                , ( partId, ( workId, work ) )
+                                                , ( partId, work )
                                                 )
                                             )
                                             work.belongsTo
@@ -277,19 +276,19 @@ emptyCell =
         ]
 
 
-workCell : Model -> ( Id, Work ) -> Html Msg
-workCell model ( workId, work ) =
+workCell : Model -> Work -> Html Msg
+workCell model work =
     let
         selected =
-            Set.member workId model.selection
+            Set.member work.id model.selection
                 || Set.member work.process model.selection
                 || List.any (flip Set.member model.selection) work.belongsTo
     in
     td
         [ class "selectable center aligned"
         , classIf selected "active"
-        , onMouseDownStop <| SelectWork workId (not selected) True
-        , onDragEnter <| SelectWork workId (not selected) False
+        , onMouseDownStop <| SelectWork work.id (not selected) True
+        , onDragEnter <| SelectWork work.id (not selected) False
         ]
         [ i
             [ class <|
