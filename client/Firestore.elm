@@ -4,10 +4,12 @@ module Firestore exposing
     , Document
     , Firestore
     , FirestoreSub
+    , Id
     , Lens
     , Reference
     , SubPort
     , apply
+    , getId
     , init
     , ref
     , render
@@ -43,6 +45,10 @@ type FirestoreSub r
         }
 
 
+type alias Id =
+    Path.Id
+
+
 type alias Collection s r =
     Internal.Collection s r
 
@@ -70,6 +76,11 @@ type alias CmdPort msg =
 ref : Path -> Reference s r
 ref =
     Reference
+
+
+getId : Reference s r -> Id
+getId (Reference p) =
+    Path.getLast p |> Maybe.withDefault ""
 
 
 init : FirestoreDesc r -> Firestore r

@@ -3,28 +3,28 @@ module Page.Browse exposing (..)
 import Data exposing (Auth, Data)
 import Data.Client exposing (Client)
 import Data.Project as Project exposing (Part, PartId, ProcessId, Project, newPart)
-import Data.User
+import Data.User as User
 import Data.Work as Work exposing (Work, WorkId)
-import Dict
+import Dict exposing (Dict)
 import Dict.Extra as Dict
 import Firestore exposing (Lens)
 import Firestore.Access as Access exposing (Accessor)
 import Firestore.Lens as Lens exposing (o)
-import Firestore.Path exposing (Id)
+import Firestore.Path as Path
 import Firestore.Remote as Remote
 import Firestore.Update as Update exposing (Updater)
 import GDrive
-import Html exposing (Attribute, Html, div, i, table, tbody, td, text, th, thead, tr)
+import Html exposing (Attribute, Html, div, i, span, table, tbody, td, text, th, thead, tr)
 import Html.Attributes exposing (class, style)
 import Html.Events
 import Maybe.Extra as Maybe
 import Set exposing (Set)
-import Util exposing (classIf, flip, onDragEnter, onMouseDownStop)
+import Util exposing (classIf, flip, flip2, onDragEnter, onMouseDownStop)
 import View.Button as Button
 
 
 type alias Model =
-    { selection : Set Id
+    { selection : Set Work.Id
     }
 
 
@@ -36,8 +36,10 @@ init =
 type Msg
     = AddPart (List ProcessId) PartId Part
     | CreatedWorkFolder ProcessId PartId GDrive.FileMeta
-    | SelectWork Id Bool Bool
+    | SelectWork Work.Id Bool Bool
     | ClearSelection
+    | SetWorkStaffs (List Work) (List User.Id)
+    | SetWorkReviewers (List Work) (List User.Id)
     | None
 
 
@@ -104,8 +106,40 @@ update auth msg model projectLens =
             , Cmd.none
             )
 
-        None ->
+        SetWorkStaffs works users ->
+            ( model
+            , Update.all <|
+                flip List.map works <|
+                    \w ->
+                        Update.modify (o projectLens <| Project.work w.id)
+                            Work.desc
+                        <|
+                            \work -> { work | staffs = userRefs users }
+            , Cmd.none
+            )
+
+        SetWorkReviewers works users ->
+            ( model
+            , Update.all <|
+                flip List.map works <|
+                    \w ->
+                        Update.modify (o projectLens <| Project.work w.id)
+                            Work.desc
+                        <|
+                            \work -> { work | reviewers = userRefs users }
+            , Cmd.none
+            )
+
+        _ ->
             ( model, Update.none, Cmd.none )
+
+
+userRefs : List User.Id -> List User.Reference
+userRefs =
+    List.map <|
+        \id ->
+            Firestore.ref <|
+                Path.fromIds [ "users", id ]
 
 
 view :
@@ -124,28 +158,25 @@ view auth model data project =
             Dict.toList project.parts
                 |> List.sortBy (\( _, p ) -> p.order)
     in
-    flip Access.map
+    flip2 Access.map2
         (Access.access
             (o (Data.project project.id) <| o Project.works Lens.getAll)
             data
         )
+        (Access.access (o (Data.projectMembers project) Lens.gets) data)
     <|
-        \works_ ->
+        \works_ members ->
             let
                 works =
                     List.concatMap
-                        (\( workId, rw ) ->
-                            Remote.toMaybe rw
-                                |> Maybe.unwrap []
-                                    (\work ->
-                                        List.map
-                                            (\partId ->
-                                                ( work.process
-                                                , ( partId, work )
-                                                )
-                                            )
-                                            work.belongsTo
+                        (\work ->
+                            List.map
+                                (\partId ->
+                                    ( work.process
+                                    , ( partId, work )
                                     )
+                                )
+                                work.belongsTo
                         )
                         works_
                         |> Dict.groupBy Tuple.first
@@ -154,6 +185,9 @@ view auth model data project =
                                 List.map Tuple.second ws
                                     |> Dict.fromList
                             )
+
+                selection =
+                    List.filter (isSelected model.selection) works_
             in
             div
                 [ style "min-height" "100vh"
@@ -214,34 +248,54 @@ view auth model data project =
                                     ]
                                ]
                     ]
-                , actions
+                , actions members selection
                 ]
 
 
-actions =
+actions members selection =
+    let
+        staffs =
+            gatherList (.staffs >> List.map Firestore.getId) selection
+
+        reviewers =
+            gatherList (.reviewers >> List.map Firestore.getId) selection
+    in
     div
-        [ class "ui three column grid"
+        [ class "ui two column grid"
         , style "position" "fixed"
         , style "width" "calc(100% - 210px)"
         , style "margin" "0"
         , style "bottom" "0"
+        , onMouseDownStop None
         ]
         [ div [ class "column" ]
             [ div [ class "ui fluid card" ]
                 [ div [ class "content" ]
                     [ div [ class "header" ] [ text "メンバー" ] ]
+                , div [ class "content" ]
+                    [ Html.p []
+                        [ text "担当："
+                        , User.selectionList
+                            members
+                            (Dict.keys staffs.all)
+                            (Dict.keys staffs.partially)
+                            |> Html.map (SetWorkStaffs selection)
+                        ]
+                    , Html.p []
+                        [ text "チェック："
+                        , User.selectionList
+                            members
+                            (Dict.keys reviewers.all)
+                            (Dict.keys reviewers.partially)
+                            |> Html.map (SetWorkReviewers selection)
+                        ]
+                    ]
                 ]
             ]
         , div [ class "column" ]
             [ div [ class "ui fluid card" ]
                 [ div [ class "content" ]
                     [ div [ class "header" ] [ text "スケジュール" ] ]
-                ]
-            ]
-        , div [ class "column" ]
-            [ div [ class "ui fluid card" ]
-                [ div [ class "content" ]
-                    [ div [ class "header" ] [ text "アクティビティ" ] ]
                 ]
             ]
         ]
@@ -280,19 +334,103 @@ workCell : Model -> Work -> Html Msg
 workCell model work =
     let
         selected =
-            Set.member work.id model.selection
-                || Set.member work.process model.selection
-                || List.any (flip Set.member model.selection) work.belongsTo
+            isSelected model.selection work
+
+        selectedOnly =
+            model.selection == Set.singleton work.id
     in
     td
         [ class "selectable center aligned"
         , classIf selected "active"
-        , onMouseDownStop <| SelectWork work.id (not selected) True
+        , onMouseDownStop <| SelectWork work.id (not selectedOnly) True
         , onDragEnter <| SelectWork work.id (not selected) False
         ]
-        [ i
-            [ class <|
-                Work.iconClass work.status
-            ]
-            []
+        [ i [ class <| Work.iconClass <| Work.getStatus work ] []
         ]
+
+
+isSelected : Set Work.Id -> Work -> Bool
+isSelected selection work =
+    Set.member work.id selection
+        || Set.member work.process selection
+        || List.any (flip Set.member selection) work.belongsTo
+
+
+gatherList :
+    (Work -> List comparable)
+    -> List Work
+    ->
+        { all : Dict comparable (List Work)
+        , partially : Dict comparable (List Work)
+        }
+gatherList getter =
+    List.foldr
+        (\work result ->
+            let
+                items =
+                    getter work
+                        |> List.map (\item -> ( item, [ work ] ))
+                        |> Dict.fromList
+            in
+            if result.notAll then
+                { result
+                    | partially =
+                        Dict.merge Dict.insert
+                            (\item xs ys -> Dict.insert item <| xs ++ ys)
+                            Dict.insert
+                            items
+                            result.partially
+                            Dict.empty
+                }
+
+            else if Dict.isEmpty items then
+                { result
+                    | notAll = True
+                    , all = Dict.empty
+                    , partially =
+                        Dict.merge Dict.insert
+                            (\item xs ys -> Dict.insert item <| xs ++ ys)
+                            Dict.insert
+                            result.all
+                            result.partially
+                            Dict.empty
+                }
+
+            else if
+                Dict.isEmpty result.all
+                    && Dict.isEmpty result.partially
+                    && not result.notAll
+            then
+                { result | all = items }
+
+            else
+                Dict.merge
+                    (\item _ rs ->
+                        { rs
+                            | all = Dict.remove item rs.all
+                            , partially =
+                                Dict.update item
+                                    (Maybe.unwrap [ work ] ((::) work) >> Just)
+                                    rs.partially
+                        }
+                    )
+                    (\item _ _ rs ->
+                        { rs
+                            | all =
+                                Dict.update item (Maybe.map <| (::) work) rs.all
+                        }
+                    )
+                    (\item _ rs ->
+                        { rs
+                            | partially =
+                                Dict.update item
+                                    (Maybe.unwrap [ work ] ((::) work) >> Just)
+                                    rs.partially
+                        }
+                    )
+                    result.all
+                    items
+                    result
+        )
+        { all = Dict.empty, partially = Dict.empty, notAll = False }
+        >> (\r -> { all = r.all, partially = r.partially })

@@ -74,7 +74,7 @@ function initialize(app) {
     }
 
     function listen(path, paths, tree) {
-        if (paths.item && !tree.__listener__) {
+        if (path.length > 0 && paths.item && !tree.__listener__) {
             if (path.length % 2 == 1) {
                 tree.__listener__ =
                     reference(path).onSnapshot({
@@ -86,7 +86,8 @@ function initialize(app) {
                         })
                         const updates = makePathMapAt(path, map)
 
-                        console.log("snapshots", showPathMap(updates))
+                        console.log("snapshots", querySnapshot.metadata,
+                                    showPathMap(updates))
                         if (!querySnapshot.metadata.hasPendingWrites)
                             sendSub({updates: updates})
                     })
@@ -98,7 +99,8 @@ function initialize(app) {
                     }, doc => {
                         const updates = makePathMap(path, makeDoc(doc))
 
-                        console.log("snapshot", doc, showPathMap(updates)[0]);
+                        console.log("snapshot", doc.metadata,
+                                    showPathMap(updates)[0]);
                         if (!doc.metadata.hasPendingWrites)
                             sendSub({updates: updates})
                     })

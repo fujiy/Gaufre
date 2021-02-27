@@ -36,6 +36,11 @@ fromMaybe ma =
             UpToDate a
 
 
+withDefault : a -> Remote a -> a
+withDefault a =
+    toMaybe >> Maybe.withDefault a
+
+
 map : (a -> b) -> Remote a -> Remote b
 map f r =
     case r of
@@ -97,6 +102,11 @@ andThen2 f ra rb =
 unmaybe : Remote (Maybe a) -> Remote a
 unmaybe =
     andThen fromMaybe
+
+
+cats : List (Remote a) -> List a
+cats =
+    List.filterMap toMaybe
 
 
 traverse : ((a -> Remote a) -> t -> r) -> (Remote x -> r) -> Remote t -> r

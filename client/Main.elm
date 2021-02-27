@@ -5,6 +5,7 @@ port module Main exposing (..)
 import Browser exposing (Document, application)
 import Browser.Navigation as Nav
 import Data exposing (Auth, Data)
+import Data.User exposing (User)
 import Firestore as Firestore exposing (Firestore)
 import Firestore.Access as Access exposing (Accessor)
 import GDrive
@@ -23,7 +24,7 @@ port signIn : () -> Cmd msg
 port signOut : () -> Cmd msg
 
 
-port authorized : ({ name : String, uid : String, token : String } -> msg) -> Sub msg
+port authorized : ({ auth : Auth, user : User } -> msg) -> Sub msg
 
 
 port firestoreSubPort : Firestore.SubPort msg
@@ -68,7 +69,7 @@ type Msg
     | LinkClicked Browser.UrlRequest
     | SignIn
     | SignOut
-    | Authorized Auth
+    | Authorized Auth User
     | Firestore (Firestore.FirestoreSub Data)
     | Page Page.Msg
 
@@ -81,12 +82,12 @@ update msg model =
                 SignIn ->
                     ( model, signIn () )
 
-                Authorized auth ->
+                Authorized auth user ->
                     let
                         ( firestore, mview, cmd ) =
                             Firestore.update
                                 firestoreCmdPort
-                                (Data.initClient auth)
+                                (Data.initClient auth user)
                                 (pageView auth <| Page.init url)
                                 (Firestore.init Data.desc)
                     in
@@ -243,7 +244,7 @@ subscriptions : Model -> Sub Msg
 subscriptions model =
     case model of
         NotSignedIn _ ->
-            authorized Authorized
+            authorized <| \{ auth, user } -> Authorized auth user
 
         SignedIn { firestore } ->
             Firestore.watch firestoreSubPort firestore

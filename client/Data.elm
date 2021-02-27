@@ -3,7 +3,7 @@ module Data exposing (..)
 import Array
 import Data.Client as Client
 import Data.Project as Project exposing (Project)
-import Data.User as User
+import Data.User as User exposing (User)
 import Firestore exposing (..)
 import Firestore.Desc as Desc exposing (FirestoreDesc)
 import Firestore.Lens as Lens exposing (o)
@@ -14,7 +14,6 @@ import Maybe.Extra as Maybe
 
 type alias Auth =
     { uid : String
-    , name : String
     , token : String
     }
 
@@ -24,6 +23,11 @@ type alias Data =
     , clients : Client.Collection
     , projects : Project.Collection
     }
+
+
+
+-- Lenses
+-- Collection
 
 
 clients : Lens Data Client.Collection
@@ -41,6 +45,10 @@ projects =
     Lens.collection .projects (\b a -> { a | projects = b })
 
 
+
+-- User
+
+
 myClient : Auth -> Lens Data Client.Document
 myClient auth =
     o clients <| Lens.doc auth.uid
@@ -49,6 +57,10 @@ myClient auth =
 me : Auth -> Lens Data User.Document
 me auth =
     o users <| Lens.doc auth.uid
+
+
+
+-- Project
 
 
 myProjects : Auth -> Lens Data (List Project.Document)
@@ -78,6 +90,19 @@ projectDeref =
     Lens.dereferer projects
 
 
+projectMembers : Project -> Lens Data (List User.Document)
+projectMembers p =
+    Lens.derefs (Lens.dereferer users) <|
+        Lens.const p.members
+
+
+
+-- o (myClient auth) <|
+--     o Lens.get <|
+--         Lens.composeIso Client.projects (Lens.reverse Lens.list2array)
+-- Firestore
+
+
 desc : FirestoreDesc Data
 desc =
     Desc.collection "users" .users User.desc
@@ -86,11 +111,10 @@ desc =
         |> Desc.firestore Data
 
 
-initClient : Auth -> Update.Updater Data
-initClient auth =
+initClient : Auth -> User -> Update.Updater Data
+initClient auth user =
     Update.all
-        [ Update.default (me auth) User.desc <|
-            { name = auth.name }
+        [ Update.default (me auth) User.desc user
         , Update.default (myClient auth) Client.desc <|
             { projects = Array.empty }
         ]

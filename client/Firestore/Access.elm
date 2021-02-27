@@ -14,7 +14,7 @@ type alias Accessor r a =
 
 success : a -> Accessor r a
 success a =
-    Accessor Path.empty (UpToDate a)
+    Accessor (Path.rootItem ()) (UpToDate a)
 
 
 failure : Accessor r a
@@ -87,18 +87,37 @@ remote =
     mapRemote UpToDate
 
 
+join : Accessor r (Accessor r a) -> Accessor r a
+join (Accessor paths raa) =
+    case raa of
+        Failure ->
+            Accessor paths Failure
+
+        Loading ->
+            Accessor paths Loading
+
+        Committing (Accessor paths_ (UpToDate a)) ->
+            Accessor (Path.append paths paths_) (Committing a)
+
+        Committing (Accessor paths_ ra) ->
+            Accessor (Path.append paths paths_) ra
+
+        UpToDate (Accessor paths_ ra) ->
+            Accessor (Path.append paths paths_) ra
+
+
 andThen : (a -> Accessor r b) -> Accessor r a -> Accessor r b
-andThen f (Accessor paths ra) =
-    Remote.andThen (f >> toRemote) ra
-        |> unremote
-        |> requires paths
+andThen f =
+    map f >> join
 
 
-andThen2 : (a -> b -> Accessor r c) -> Accessor r a -> Accessor r b -> Accessor r c
-andThen2 f (Accessor pas ra) (Accessor pbs rb) =
-    Remote.andThen2 (\a b -> f a b |> toRemote) ra rb
-        |> unremote
-        |> requires (Path.append pas pbs)
+andThen2 :
+    (a -> b -> Accessor r c)
+    -> Accessor r a
+    -> Accessor r b
+    -> Accessor r c
+andThen2 f ra rb =
+    map2 f ra rb |> join
 
 
 for : (a -> Accessor r b) -> Accessor r (List a) -> Accessor r (List b)
@@ -113,7 +132,7 @@ forArray f ac =
 
 list : List (Accessor r a) -> Accessor r (List a)
 list =
-    List.foldr (map2 (::)) (success [])
+    List.foldr (map2 (::)) (Accessor Path.empty <| UpToDate [])
 
 
 array : Array (Accessor r a) -> Accessor r (Array a)
@@ -176,13 +195,3 @@ thenAccess l (Accessor paths a) =
             Remote.map (access l) a |> unremote
     in
     Accessor (Path.joinSub paths paths_) b
-
-
-require : Path -> Accessor r a -> Accessor r a
-require path (Accessor paths ra) =
-    Accessor (Path.push path paths) ra
-
-
-requires : Paths -> Accessor r a -> Accessor r a
-requires paths_ (Accessor paths ra) =
-    Accessor (Path.append paths_ paths) ra

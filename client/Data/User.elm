@@ -1,13 +1,31 @@
 module Data.User exposing (..)
 
-import Firestore exposing (Document)
+import Dict
+import Dict.Extra as Dict
+import Firestore
 import Firestore.Desc as Desc exposing (DocumentDesc)
-import GDrive
+import Html exposing (Html, a, div, img, input, node, option, select, span, text)
+import Html.Attributes as Attr exposing (attribute, class, src, style, type_, value)
+import Html.Events exposing (onInput)
+import List
+import Set
+import Util exposing (classIf, flip, onChangeValues)
+
+
+type alias Id =
+    String
 
 
 type alias User =
-    { name : String
+    { id : Id
+    , name : String
+    , image : String
+    , email : String
     }
+
+
+
+-- Firestore
 
 
 type alias Collection =
@@ -24,17 +42,57 @@ type alias Reference =
 
 desc : DocumentDesc () User
 desc =
-    Desc.document User <|
+    Desc.documentWithId User <|
         Desc.field "name" .name Desc.string
+            >> Desc.field "image" .image Desc.string
+            >> Desc.field "email" .email Desc.string
 
 
 
--- encode : Encode.Encoder (Document User)
--- encode =
---     Encode.document
---         [ Encode.field "name" .name Encode.string
---         ]
--- decode : Decode.Decoder (Document User)
--- decode =
---     Decode.document User
---         |> Decode.field "name" Decode.string
+-- View
+
+
+label : msg -> User -> Html msg
+label msg user =
+    a
+        [ class "ui image label" ]
+        [ img [ src user.image ] []
+        , text user.name
+        ]
+
+
+selectionList : List User -> List Id -> List Id -> Html (List Id)
+selectionList choices actives inactives =
+    let
+        values =
+            actives
+
+        inactiveSet =
+            Set.fromList inactives
+    in
+    node "ui-dropdown"
+        [ class "ui small multiple search selection dropdown"
+        , attribute "multiple" ""
+        , attribute "value" <| String.join "," values
+        , onChangeValues
+        ]
+    <|
+        [ input
+            [ type_ "hidden"
+            , Attr.name "staffs"
+            ]
+            []
+        , Html.i [ class "dropdown icon" ] []
+        , div [ class "default text" ] [ text "メンバーを割り当てる" ]
+        , div [ class "menu" ] <|
+            List.map
+                (\user ->
+                    div
+                        [ class "item"
+                        , attribute "data-value" user.id
+                        ]
+                    <|
+                        [ span [] [ text user.name ] ]
+                )
+                choices
+        ]

@@ -6,7 +6,7 @@ import Dict exposing (Dict)
 import Dict.Extra as Dict
 import Firestore exposing (..)
 import Firestore.Desc as Desc exposing (Desc, DocumentDesc)
-import Firestore.Lens as Lens exposing (o)
+import Firestore.Lens as Lens exposing (lens, o)
 import Firestore.Path exposing (Id)
 import GDrive
 import Maybe.Extra as Maybe
@@ -19,6 +19,10 @@ type alias Project =
     , processes : Dict ProcessId Process
     , parts : Dict ProcessId Part
     }
+
+
+
+-- Firestore
 
 
 type alias Sub =
@@ -38,6 +42,25 @@ type alias Document =
     Firestore.Document Sub Project
 
 
+desc : DocumentDesc Sub Project
+desc =
+    Desc.documentWithIdAndSubs
+        Project
+        (Desc.field "name" .name Desc.string
+            >> Desc.field "members"
+                .members
+                (Desc.list Desc.reference)
+            >> Desc.field "proesses" .processes (Desc.dict processDesc)
+            >> Desc.field "parts" .parts (Desc.dict partDesc)
+        )
+        Sub
+        (Desc.collection "works" .works Work.desc)
+
+
+
+-- Lenses
+
+
 works : Lens Document Work.Collection
 works =
     Lens.subCollection .works (\b a -> { a | works = b })
@@ -46,6 +69,10 @@ works =
 work : Id -> Lens Document Work.Document
 work id =
     o works <| Lens.doc id
+
+
+
+-- Utilities
 
 
 init : GDrive.FileMeta -> User.Reference -> Project
@@ -94,19 +121,8 @@ newPart p =
     try (Dict.size p.parts) (Dict.size p.parts)
 
 
-desc : DocumentDesc Sub Project
-desc =
-    Desc.documentWithIdAndSubs
-        Project
-        (Desc.field "name" .name Desc.string
-            >> Desc.field "members"
-                .members
-                (Desc.list Desc.reference)
-            >> Desc.field "proesses" .processes (Desc.dict processDesc)
-            >> Desc.field "parts" .parts (Desc.dict partDesc)
-        )
-        Sub
-        (Desc.collection "works" .works Work.desc)
+
+-- Process
 
 
 type alias ProcessId =
@@ -139,6 +155,10 @@ defaultProcesses =
     , { name = "背景", order = 6, upstreams = [] }
     , { name = "撮影", order = 7, upstreams = [] }
     ]
+
+
+
+-- Part
 
 
 type alias PartId =

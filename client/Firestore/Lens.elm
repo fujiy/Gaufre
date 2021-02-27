@@ -86,6 +86,13 @@ o (Lens af uf) (Lens ag ug) =
         )
 
 
+const : a -> Lens x a
+const a =
+    Lens
+        (\_ -> Access.success a)
+        (\_ _ -> noUpdater)
+
+
 
 -- tuple : Lens a b -> Lens a c -> Lens a (b, c)
 -- tuple (Lens af uf) (Lens ag ug) =
@@ -235,8 +242,8 @@ doc id =
         )
 
 
-getAll : Lens (Collection s r) (List ( Id, Remote r ))
-getAll =
+getAllRemote : Lens (Collection s r) (List ( Id, Remote r ))
+getAllRemote =
     Lens
         (\(Collection col) ->
             Accessor
@@ -268,6 +275,28 @@ getAll =
         )
 
 
+getAll : Lens (Collection s r) (List r)
+getAll =
+    Lens
+        (\(Collection col) ->
+            Accessor
+                (Path.rootItem ())
+                (Dict.values col.docs
+                    |> List.filterMap (\(Document _ r) -> Remote.toMaybe r)
+                    |> UpToDate
+                )
+        )
+        (\u rs ->
+            Updater <|
+                \(Collection col) ->
+                    { value = Collection col
+                    , updates = Path.rootItem u
+                    , requests = Path.empty
+                    , afterwards = noUpdater
+                    }
+        )
+
+
 get : Lens (Document s r) r
 get =
     Lens (\(Document _ r) -> Accessor (Path.rootItem ()) r)
@@ -280,6 +309,11 @@ get =
                     , afterwards = noUpdater
                     }
         )
+
+
+gets : Lens (List (Document s r)) (List r)
+gets =
+    list get
 
 
 getRemote : Lens (Document s r) (Remote r)

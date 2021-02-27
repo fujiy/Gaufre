@@ -108,7 +108,19 @@ alter (Lens acc upd) (DocumentDesc d) f =
 
 modify : Lens a (Document s r) -> DocumentDesc s r -> (r -> r) -> Updater a
 modify l d f =
-    alter l d <| Maybe.unwrap NoChange (f >> Update)
+    alter l d <|
+        Maybe.unwrap NoChange
+            (\r ->
+                let
+                    new =
+                        f r
+                in
+                if new == r then
+                    NoChange
+
+                else
+                    Update new
+            )
 
 
 default : Lens a (Document s r) -> DocumentDesc s r -> r -> Updater a

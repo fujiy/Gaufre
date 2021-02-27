@@ -39,10 +39,7 @@ type alias Work =
     , process : ProcessId
     , belongsTo : List PartId
     , staffs : List User.Reference
-    , status : Status
-
-    -- , reviewers : List (Reference User)
-    -- , status : Status
+    , reviewers : List User.Reference
     }
 
 
@@ -65,7 +62,7 @@ init id name process part =
     , process = process
     , belongsTo = [ part ]
     , staffs = []
-    , status = NotAssigned
+    , reviewers = []
     }
 
 
@@ -76,16 +73,29 @@ desc =
             >> Desc.field "process" .process Desc.string
             >> Desc.field "belongsTo" .belongsTo (Desc.list Desc.string)
             >> Desc.field "staffs" .staffs (Desc.list Desc.reference)
-            >> Desc.field "status"
-                .status
-                (Desc.enum
-                    [ ( "NotAssigned", NotAssigned )
-                    , ( "Waiting", Waiting )
-                    , ( "InProgress", InProgress )
-                    , ( "Reviewing", Reviewing )
-                    , ( "Complete", Complete )
-                    ]
-                )
+            >> Desc.field "reviewers" .reviewers (Desc.list Desc.reference)
+
+
+
+-- >> Desc.field "status"
+--     .status
+--     (Desc.enum
+--         [ ( "NotAssigned", NotAssigned )
+--         , ( "Waiting", Waiting )
+--         , ( "InProgress", InProgress )
+--         , ( "Reviewing", Reviewing )
+--         , ( "Complete", Complete )
+--         ]
+--     )
+
+
+getStatus : Work -> Status
+getStatus work =
+    if List.isEmpty work.staffs then
+        NotAssigned
+
+    else
+        Waiting
 
 
 iconClass : Status -> String

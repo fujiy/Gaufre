@@ -6,6 +6,7 @@ import Html exposing (Attribute)
 import Html.Attributes exposing (attribute, class)
 import Html.Events as Events exposing (stopPropagationOn)
 import Json.Decode as Decode
+import List
 
 
 uncurry : (a -> b -> c) -> ( a, b ) -> c
@@ -16,6 +17,11 @@ uncurry f ( a, b ) =
 flip : (a -> b -> c) -> b -> a -> c
 flip f b a =
     f a b
+
+
+flip2 : (a -> b -> c -> d) -> b -> c -> a -> d
+flip2 f b c a =
+    f a b c
 
 
 orWith : (a -> a -> a) -> Maybe a -> Maybe a -> Maybe a
@@ -84,3 +90,24 @@ onDragEnter msg =
             )
         <|
             Decode.field "buttons" Decode.int
+
+
+values : (String -> Maybe a) -> Decode.Decoder (List a)
+values f =
+    Decode.string
+        |> Decode.map
+            (String.split "," >> List.filterMap f)
+
+
+onChangeValues : Attribute (List String)
+onChangeValues =
+    Events.on "change" <|
+        Decode.map
+            (\s ->
+                if s == "" then
+                    []
+
+                else
+                    String.split "," s
+            )
+            Events.targetValue
