@@ -1,6 +1,7 @@
 module Data exposing (..)
 
 import Array
+import Browser.Navigation as Nav
 import Data.Client as Client
 import Data.Project as Project exposing (Project)
 import Data.User as User exposing (User)
@@ -15,6 +16,7 @@ import Maybe.Extra as Maybe
 type alias Auth =
     { uid : String
     , token : String
+    , navKey : Nav.Key
     }
 
 

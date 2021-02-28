@@ -18,7 +18,8 @@ import Page.Dashboard as Dashboard
 import Page.Projects as Projects
 import Url exposing (Url)
 import Url.Builder
-import Url.Parser as Url exposing ((</>))
+import Url.Parser as Url exposing ((</>), (<?>))
+import Url.Parser.Query as Q
 import Util exposing (..)
 
 
@@ -58,6 +59,9 @@ urlChanged model url =
                 </> Url.oneOf
                         [ Url.map (Dashboard Dashboard.init) <|
                             Url.s "dashboard"
+                        , Url.map
+                            (\_ _ -> Browse << Browse.initWithWork)
+                            (Url.string </> Url.string <?> Q.string "work")
                         , Url.map (Browse Browse.init) Url.top
                         ]
         ]

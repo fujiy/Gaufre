@@ -24,7 +24,7 @@ port signIn : () -> Cmd msg
 port signOut : () -> Cmd msg
 
 
-port authorized : ({ auth : Auth, user : User } -> msg) -> Sub msg
+port authorized : ({ auth : { uid : String, token : String }, user : User } -> msg) -> Sub msg
 
 
 port firestoreSubPort : Firestore.SubPort msg
@@ -50,7 +50,6 @@ type Model
         , page : Page.Model
         , firestore : Firestore Data.Data
         , view : Document Msg
-        , navKey : Nav.Key
         , url : Url
         }
 
@@ -96,7 +95,6 @@ update msg model =
                         , page = Page.init url
                         , firestore = firestore
                         , view = Maybe.withDefault (Document "Gaufre" []) mview
-                        , navKey = navKey
                         , url = url
                         }
                     , cmd
@@ -108,7 +106,7 @@ update msg model =
         SignedIn r ->
             case msg of
                 SignOut ->
-                    ( NotSignedIn { navKey = r.navKey, url = r.url }
+                    ( NotSignedIn { navKey = r.auth.navKey, url = r.url }
                     , signOut ()
                     )
 
@@ -130,7 +128,8 @@ update msg model =
                 Page m ->
                     case m of
                         Page.SignOut ->
-                            ( NotSignedIn { navKey = r.navKey, url = r.url }
+                            ( NotSignedIn
+                                { navKey = r.auth.navKey, url = r.url }
                             , signOut ()
                             )
 
@@ -158,7 +157,9 @@ update msg model =
                 LinkClicked urlRequest ->
                     case urlRequest of
                         Browser.Internal url ->
-                            ( model, Nav.pushUrl r.navKey (Url.toString url) )
+                            ( model
+                            , Nav.pushUrl r.auth.navKey (Url.toString url)
+                            )
 
                         Browser.External "" ->
                             ( model, Cmd.none )
@@ -243,8 +244,12 @@ pageView auth page data =
 subscriptions : Model -> Sub Msg
 subscriptions model =
     case model of
-        NotSignedIn _ ->
-            authorized <| \{ auth, user } -> Authorized auth user
+        NotSignedIn m ->
+            authorized <|
+                \{ auth, user } ->
+                    Authorized
+                        { uid = auth.uid, token = auth.token, navKey = m.navKey }
+                        user
 
         SignedIn { firestore } ->
             Firestore.watch firestoreSubPort firestore

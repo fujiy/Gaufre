@@ -1,13 +1,14 @@
 module Page.Browse exposing (..)
 
+import Browser.Navigation as Nav
 import Data exposing (Auth, Data)
 import Data.Client exposing (Client)
-import Data.Project as Project exposing (Part, PartId, ProcessId, Project, newPart)
-import Data.User as User
+import Data.Project as Project exposing (Part, PartId, Process, ProcessId, Project, newPart, work)
+import Data.User as User exposing (User)
 import Data.Work as Work exposing (Work, WorkId)
 import Dict exposing (Dict)
 import Dict.Extra as Dict
-import Firestore exposing (Lens)
+import Firestore exposing (Id, Lens)
 import Firestore.Access as Access exposing (Accessor)
 import Firestore.Lens as Lens exposing (o)
 import Firestore.Path as Path
@@ -16,21 +17,29 @@ import Firestore.Update as Update exposing (Updater)
 import GDrive
 import Html exposing (Attribute, Html, div, i, span, table, tbody, td, text, th, thead, tr)
 import Html.Attributes exposing (class, style)
-import Html.Events
+import Html.Events exposing (onDoubleClick)
+import List.Extra as List
 import Maybe.Extra as Maybe
 import Set exposing (Set)
+import Url.Builder as Url
 import Util exposing (classIf, flip, flip2, onDragEnter, onMouseDownStop)
 import View.Button as Button
 
 
 type alias Model =
-    { selection : Set Work.Id
+    { work : Maybe Work.Id
+    , selection : Set Id
     }
 
 
 init : Model
 init =
-    { selection = Set.empty }
+    { work = Nothing, selection = Set.empty }
+
+
+initWithWork : Maybe Work.Id -> Model
+initWithWork mwork =
+    { work = mwork, selection = Set.empty }
 
 
 type Msg
@@ -38,6 +47,7 @@ type Msg
     | CreatedWorkFolder ProcessId PartId GDrive.FileMeta
     | SelectWork Work.Id Bool Bool
     | ClearSelection
+    | MoveToWork Process Part Work
     | SetWorkStaffs (List Work) (List User.Id)
     | SetWorkReviewers (List Work) (List User.Id)
     | None
@@ -106,6 +116,15 @@ update auth msg model projectLens =
             , Cmd.none
             )
 
+        MoveToWork process part work ->
+            ( model
+            , Update.none
+            , Nav.pushUrl auth.navKey <|
+                Url.relative
+                    [ process.name, part.name ]
+                    [ Url.string "work" work.id ]
+            )
+
         SetWorkStaffs works users ->
             ( model
             , Update.all <|
@@ -142,13 +161,73 @@ userRefs =
                 Path.fromIds [ "users", id ]
 
 
-view :
-    Auth
-    -> Model
-    -> Data
-    -> Project
-    -> Accessor Data (Html Msg)
+view : Auth -> Model -> Data -> Project -> Accessor Data (Html Msg)
 view auth model data project =
+    case model.work of
+        Nothing ->
+            overview auth model data project
+
+        Just workId ->
+            workView auth data project workId
+
+
+workView : Auth -> Data -> Project -> Work.Id -> Accessor Data (Html Msg)
+workView auth data project workId =
+    flip2 Access.map2
+        (Access.access
+            (o (Data.project project.id) <| o (Project.work workId) Lens.get)
+            data
+        )
+        (Access.access (o (Data.projectMembers project) Lens.gets) data)
+    <|
+        \work members ->
+            let
+                process =
+                    Dict.get work.process project.processes
+
+                parts =
+                    List.filterMap (flip Dict.get project.parts) work.belongsTo
+
+                minPart =
+                    List.minimumBy .order parts
+
+                maxPart =
+                    List.maximumBy .order parts
+
+                workName =
+                    Maybe.map2 (\s p -> s ++ "：" ++ p.name)
+                        (if List.length parts == 1 then
+                            List.head parts |> Maybe.map .name
+
+                         else
+                            Maybe.map2
+                                (\min max -> min.name ++ " ~ " ++ max.name)
+                                minPart
+                                maxPart
+                        )
+                        process
+                        |> Maybe.withDefault work.name
+            in
+            div [ class "ui grid" ]
+                [ div [ class "row" ] []
+                , div [ class "row" ]
+                    [ div [ class "two wide column" ] []
+                    , div [ class "twelve wide column" ]
+                        [ div [ class "ui fluid card" ]
+                            [ div [ class "content" ]
+                                [ div [ class "header" ]
+                                    [ text workName ]
+                                ]
+                            ]
+                        ]
+                    , div [ class "two wide column" ] []
+                    ]
+                , actions members [ work ]
+                ]
+
+
+overview : Auth -> Model -> Data -> Project -> Accessor Data (Html Msg)
+overview auth model data project =
     let
         processes =
             Dict.toList project.processes
@@ -197,61 +276,95 @@ view auth model data project =
                 [ table
                     [ class "ui definition celled table select-none"
                     ]
-                    [ thead []
-                        [ tableHeader model processes
-                        ]
+                    [ thead [] [ tableHeader model processes ]
                     , tbody [] <|
-                        List.map
-                            (\( partId, part ) ->
-                                let
-                                    selected =
-                                        Set.member partId model.selection
-                                in
-                                tr [] <|
-                                    td
-                                        [ class "selectable"
-                                        , classIf selected "active"
-                                        , onMouseDownStop <|
-                                            SelectWork partId
-                                                (not selected)
-                                                True
-                                        , onDragEnter <|
-                                            SelectWork partId
-                                                (not selected)
-                                                False
-                                        ]
-                                        [ text part.name ]
-                                        :: List.map
-                                            (\( processId, process ) ->
-                                                Dict.get processId works
-                                                    |> Maybe.andThen
-                                                        (Dict.get partId)
-                                                    |> Maybe.unwrap
-                                                        emptyCell
-                                                        (workCell model)
-                                            )
-                                            processes
-                            )
-                            parts
-                            ++ [ let
-                                    ( newId, newPart ) =
-                                        Project.newPart project
-                                 in
-                                 tr []
-                                    [ td []
-                                        [ Button.add <|
-                                            AddPart
-                                                (Dict.keys project.processes)
-                                                newId
-                                                newPart
-                                        ]
-                                    ]
-                               ]
+                        List.map (tableRow model processes works) parts
+                            ++ [ newPartButton project ]
                     ]
                 , actions members selection
                 ]
 
 
+tableHeader : Model -> List ( ProcessId, Process ) -> Html Msg
+tableHeader model processes =
+    tr [] <|
+        th [] []
+            :: List.map
+                (\( id, process ) ->
+                    let
+                        selected =
+                            Set.member id model.selection
+                    in
+                    th
+                        [ class "selectable"
+                        , classIf selected "active"
+                        , onMouseDownStop <| SelectWork id (not selected) True
+                        , onDragEnter <| SelectWork id (not selected) False
+                        ]
+                        [ text process.name ]
+                )
+                processes
+
+
+tableRow :
+    Model
+    -> List ( ProcessId, Process )
+    -> Dict ProcessId (Dict PartId Work)
+    -> ( PartId, Part )
+    -> Html Msg
+tableRow model processes works ( partId, part ) =
+    let
+        selected =
+            Set.member partId model.selection
+    in
+    tr [] <|
+        td
+            [ class "selectable right aligned"
+            , classIf selected "active"
+            , style "padding" "5px"
+            , onMouseDownStop <| SelectWork partId (not selected) True
+            , onDragEnter <| SelectWork partId (not selected) False
+            ]
+            [ text part.name ]
+            :: List.map
+                (\( processId, process ) ->
+                    Dict.get processId works
+                        |> Maybe.andThen (Dict.get partId)
+                        |> Maybe.unwrap emptyCell (workCell model process part)
+                )
+                processes
+
+
+emptyCell : Html msg
+emptyCell =
+    td
+        [ class "disabled" ]
+        [ i [ class "plus icon" ]
+            []
+        ]
+
+
+workCell : Model -> Process -> Part -> Work -> Html Msg
+workCell model process part work =
+    let
+        selected =
+            isSelected model.selection work
+
+        selectedOnly =
+            model.selection == Set.singleton work.id
+    in
+    td
+        [ class "selectable center aligned"
+        , classIf selected "active"
+        , onMouseDownStop <| SelectWork work.id (not selectedOnly) True
+        , onDragEnter <| SelectWork work.id (not selected) False
+        , onDoubleClick <| MoveToWork process part work
+        ]
+        [ i [ class <| Work.iconClass <| Work.getStatus work ] []
+        ]
+
+
+actions : List User -> List Work -> Html Msg
 actions members selection =
     let
         staffs =
@@ -259,13 +372,21 @@ actions members selection =
 
         reviewers =
             gatherList (.reviewers >> List.map Firestore.getId) selection
+
+        ( bottom, transition ) =
+            if List.isEmpty selection then
+                ( "-50vh", "" )
+
+            else
+                ( "0", "bottom 0.2s ease-out" )
     in
     div
         [ class "ui two column grid"
         , style "position" "fixed"
         , style "width" "calc(100% - 210px)"
         , style "margin" "0"
-        , style "bottom" "0"
+        , style "bottom" bottom
+        , style "transition" transition
         , onMouseDownStop None
         ]
         [ div [ class "column" ]
@@ -301,55 +422,23 @@ actions members selection =
         ]
 
 
-tableHeader model processes =
-    tr [] <|
-        th [] []
-            :: List.map
-                (\( id, process ) ->
-                    let
-                        selected =
-                            Set.member id model.selection
-                    in
-                    th
-                        [ class "selectable"
-                        , classIf selected "active"
-                        , onMouseDownStop <| SelectWork id (not selected) True
-                        , onDragEnter <| SelectWork id (not selected) False
-                        ]
-                        [ text process.name ]
-                )
-                processes
-
-
-emptyCell : Html msg
-emptyCell =
-    td
-        [ class "disabled" ]
-        [ i [ class "plus icon" ]
-            []
-        ]
-
-
-workCell : Model -> Work -> Html Msg
-workCell model work =
+newPartButton project =
     let
-        selected =
-            isSelected model.selection work
-
-        selectedOnly =
-            model.selection == Set.singleton work.id
+        ( newId, newPart ) =
+            Project.newPart project
     in
-    td
-        [ class "selectable center aligned"
-        , classIf selected "active"
-        , onMouseDownStop <| SelectWork work.id (not selectedOnly) True
-        , onDragEnter <| SelectWork work.id (not selected) False
-        ]
-        [ i [ class <| Work.iconClass <| Work.getStatus work ] []
+    tr []
+        [ td []
+            [ Button.add <|
+                AddPart
+                    (Dict.keys project.processes)
+                    newId
+                    newPart
+            ]
         ]
 
 
-isSelected : Set Work.Id -> Work -> Bool
+isSelected : Set Id -> Work -> Bool
 isSelected selection work =
     Set.member work.id selection
         || Set.member work.process selection
