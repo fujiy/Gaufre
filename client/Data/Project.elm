@@ -136,6 +136,11 @@ type alias Process =
     }
 
 
+nullProcess : Process
+nullProcess =
+    { name = "Null Process", order = 0, upstreams = [] }
+
+
 processDesc : Desc Process
 processDesc =
     Desc.object Process <|
@@ -170,6 +175,11 @@ type alias Part =
     , order : Float
     , parent : Maybe PartId
     }
+
+
+nullPart : Part
+nullPart =
+    { name = "Null Part", order = 0, parent = Nothing }
 
 
 partDesc : Desc Part

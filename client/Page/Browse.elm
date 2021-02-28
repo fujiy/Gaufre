@@ -12,12 +12,12 @@ import Firestore exposing (Id, Lens)
 import Firestore.Access as Access exposing (Accessor)
 import Firestore.Lens as Lens exposing (o)
 import Firestore.Path as Path
-import Firestore.Remote as Remote
+import Firestore.Remote as Remote exposing (Remote(..))
 import Firestore.Update as Update exposing (Updater)
-import GDrive
-import Html exposing (Attribute, Html, div, i, span, table, tbody, td, text, th, thead, tr)
-import Html.Attributes exposing (class, style)
-import Html.Events exposing (onDoubleClick)
+import GDrive exposing (FileMeta)
+import Html exposing (Attribute, Html, div, i, img, span, table, tbody, td, text, th, thead, tr)
+import Html.Attributes exposing (class, src, style)
+import Html.Events exposing (onClick, onDoubleClick)
 import List.Extra as List
 import Maybe.Extra as Maybe
 import Set exposing (Set)
@@ -29,64 +29,123 @@ import View.Button as Button
 type alias Model =
     { work : Maybe Work.Id
     , selection : Set Id
+    , files : Remote (List FileMeta)
+    , folder : Maybe FileMeta
+    , folderId : Maybe GDrive.Id
+    , folderCache : Dict GDrive.Id FileMeta
     }
 
 
 init : Model
 init =
-    { work = Nothing, selection = Set.empty }
+    { work = Nothing
+    , selection = Set.empty
+    , files = Loading
+    , folder = Nothing
+    , folderId = Nothing
+    , folderCache = Dict.empty
+    }
 
 
-initWithWork : Maybe Work.Id -> Model
-initWithWork mwork =
-    { work = mwork, selection = Set.empty }
+initWithWork : Maybe Work.Id -> Maybe Work.Id -> Model
+initWithWork mwork mfolder =
+    { init | work = mwork, folderId = Maybe.or mfolder mwork }
 
 
 type Msg
-    = AddPart (List ProcessId) PartId Part
-    | CreatedWorkFolder ProcessId PartId GDrive.FileMeta
+    = None
+    | GotFiles (List FileMeta)
+    | GotFolder FileMeta
+    | MoveToWork Process Part Work
+    | MoveToFolder Process Part Work FileMeta
     | SelectWork Work.Id Bool Bool
     | ClearSelection
-    | MoveToWork Process Part Work
+    | AddPart (List ProcessId) PartId Part
+    | CreatedWorkFolder ProcessId PartId FileMeta
     | SetWorkStaffs (List Work) (List User.Id)
     | SetWorkReviewers (List Work) (List User.Id)
-    | None
+
+
+initialize : Auth -> Model -> Cmd Msg
+initialize auth model =
+    case model.work of
+        Nothing ->
+            Cmd.none
+
+        Just workId ->
+            if model.work == model.folderId then
+                Cmd.batch
+                    [ GDrive.files auth.token workId
+                        |> Cmd.map (Result.withDefault [] >> GotFiles)
+                    , GDrive.files_get auth.token workId
+                        |> Cmd.map
+                            (Result.toMaybe >> Maybe.unwrap None GotFolder)
+                    ]
+
+            else
+                Cmd.batch
+                    [ GDrive.files auth.token
+                        (Maybe.withDefault workId model.folderId)
+                        |> Cmd.map (Result.withDefault [] >> GotFiles)
+                    , GDrive.files_get auth.token
+                        (Maybe.withDefault workId model.folderId)
+                        |> Cmd.map
+                            (Result.toMaybe >> Maybe.unwrap None GotFolder)
+                    ]
 
 
 update :
     Auth
     -> Msg
+    -> { project : Int }
     -> Model
-    -> Lens Data Project.Document
     -> ( Model, Updater Data, Cmd Msg )
-update auth msg model projectLens =
+update auth msg m model =
+    let
+        projectLens =
+            Data.currentProject auth m.project
+    in
     case msg of
-        AddPart processes newId newPart ->
-            ( model
-            , Update.modify projectLens Project.desc <|
-                \p ->
-                    { p | parts = Dict.insert newId newPart p.parts }
-            , List.map
-                (\processId ->
-                    GDrive.createFolder auth.token
-                        newPart.name
-                        [ processId ]
-                        |> Cmd.map
-                            (Result.map (CreatedWorkFolder processId newId)
-                                >> Result.withDefault None
-                            )
-                )
-                processes
-                |> Cmd.batch
+        GotFiles files ->
+            ( { model
+                | files = UpToDate files
+                , folderCache =
+                    List.filter GDrive.isFolder files
+                        |> List.foldr
+                            (\folder -> Dict.insert folder.id folder)
+                            model.folderCache
+              }
+            , Update.none
+            , Cmd.none
             )
 
-        CreatedWorkFolder processId partId folder ->
-            ( model
-            , Update.set
-                (o projectLens <| Project.work folder.id)
-                Work.desc
-                (Work.init folder.id folder.name processId partId)
+        GotFolder folder ->
+            ( { model
+                | folder = Just folder
+                , folderCache = Dict.insert folder.id folder model.folderCache
+              }
+            , Update.none
             , Cmd.none
+            )
+
+        MoveToWork process part work ->
+            ( model
+            , Update.none
+            , Nav.pushUrl auth.navKey <|
+                Url.absolute
+                    [ String.fromInt m.project, process.name, part.name ]
+                    [ Url.string "work" work.id ]
+            )
+
+        MoveToFolder process part work file ->
+            ( model
+            , Update.none
+            , Nav.pushUrl auth.navKey <|
+                Url.absolute
+                    [ String.fromInt m.project, process.name, part.name ]
+                    [ Url.string "work" work.id
+                    , Url.string "folder" file.id
+                    ]
             )
 
         SelectWork workId select clear ->
@@ -116,13 +175,32 @@ update auth msg model projectLens =
             , Cmd.none
             )
 
-        MoveToWork process part work ->
+        AddPart processes newId newPart ->
             ( model
-            , Update.none
-            , Nav.pushUrl auth.navKey <|
-                Url.relative
-                    [ process.name, part.name ]
-                    [ Url.string "work" work.id ]
+            , Update.modify projectLens Project.desc <|
+                \p ->
+                    { p | parts = Dict.insert newId newPart p.parts }
+            , List.map
+                (\processId ->
+                    GDrive.createFolder auth.token
+                        newPart.name
+                        [ processId ]
+                        |> Cmd.map
+                            (Result.map (CreatedWorkFolder processId newId)
+                                >> Result.withDefault None
+                            )
+                )
+                processes
+                |> Cmd.batch
+            )
+
+        CreatedWorkFolder processId partId folder ->
+            ( model
+            , Update.set
+                (o projectLens <| Project.work folder.id)
+                Work.desc
+                (Work.init folder.id folder.name processId partId)
+            , Cmd.none
             )
 
         SetWorkStaffs works users ->
@@ -168,11 +246,17 @@ view auth model data project =
             overview auth model data project
 
         Just workId ->
-            workView auth data project workId
+            workView auth model data project workId
 
 
-workView : Auth -> Data -> Project -> Work.Id -> Accessor Data (Html Msg)
-workView auth data project workId =
+workView :
+    Auth
+    -> Model
+    -> Data
+    -> Project
+    -> Work.Id
+    -> Accessor Data (Html Msg)
+workView auth model data project workId =
     flip2 Access.map2
         (Access.access
             (o (Data.project project.id) <| o (Project.work workId) Lens.get)
@@ -184,29 +268,33 @@ workView auth data project workId =
             let
                 process =
                     Dict.get work.process project.processes
+                        |> Maybe.withDefault Project.nullProcess
 
                 parts =
                     List.filterMap (flip Dict.get project.parts) work.belongsTo
 
-                minPart =
+                part =
                     List.minimumBy .order parts
+                        |> Maybe.withDefault Project.nullPart
 
                 maxPart =
                     List.maximumBy .order parts
+                        |> Maybe.withDefault Project.nullPart
 
                 workName =
-                    Maybe.map2 (\s p -> s ++ "：" ++ p.name)
-                        (if List.length parts == 1 then
-                            List.head parts |> Maybe.map .name
+                    if List.length parts == 1 then
+                        part.name ++ "：" ++ process.name
 
-                         else
-                            Maybe.map2
-                                (\min max -> min.name ++ " ~ " ++ max.name)
-                                minPart
-                                maxPart
-                        )
-                        process
-                        |> Maybe.withDefault work.name
+                    else
+                        part.name
+                            ++ " 〜 "
+                            ++ maxPart.name
+                            ++ "："
+                            ++ process.name
+
+                ( folders, files ) =
+                    Remote.withDefault [] model.files
+                        |> List.partition GDrive.isFolder
             in
             div [ class "ui grid" ]
                 [ div [ class "row" ] []
@@ -215,8 +303,39 @@ workView auth data project workId =
                     , div [ class "twelve wide column" ]
                         [ div [ class "ui fluid card" ]
                             [ div [ class "content" ]
-                                [ div [ class "header" ]
-                                    [ text workName ]
+                                [ div [ class "header" ] [ text workName ]
+                                , breadcrumb model work
+                                    |> Html.map
+                                        (Maybe.unwrap
+                                            (MoveToWork process part work)
+                                            (MoveToFolder process part work)
+                                        )
+                                ]
+                            , div [ class "content" ]
+                                [ div
+                                    [ class "ui link three stackable cards" ]
+                                  <|
+                                    List.map
+                                        (folderCard
+                                            >> Html.map
+                                                (MoveToFolder process part work)
+                                        )
+                                        folders
+                                , div
+                                    [ class "ui link three stackable cards" ]
+                                  <|
+                                    List.map fileCard files
+                                , case model.files of
+                                    Loading ->
+                                        div [ class "ui text loader" ]
+                                            [ text "Loading" ]
+
+                                    UpToDate [] ->
+                                        div [ class "center aligned" ]
+                                            [ text "ファイルを追加する" ]
+
+                                    _ ->
+                                        text ""
                                 ]
                             ]
                         ]
@@ -224,6 +343,57 @@ workView auth data project workId =
                     ]
                 , actions members [ work ]
                 ]
+
+
+fileCard : FileMeta -> Html msg
+fileCard file =
+    div [ class "card" ]
+        [ div [ class "square image" ]
+            [ img [ src file.thumbnailLink ] [] ]
+        , div [ class "content" ]
+            [ img [ src file.iconLink, class "ui right spaced image" ] []
+            , text file.name
+            ]
+        ]
+
+
+folderCard : FileMeta -> Html FileMeta
+folderCard file =
+    div
+        [ class "card"
+        , onDoubleClick file
+        ]
+        [ div [ class "content" ]
+            [ img [ src file.iconLink, class "ui right spaced image" ] []
+            , text file.name
+            ]
+        ]
+
+
+breadcrumb : Model -> Work -> Html (Maybe FileMeta)
+breadcrumb model work =
+    let
+        path =
+            Maybe.unwrap [] back model.folder
+                |> (::) ( work.name, Nothing )
+
+        back folder =
+            if folder.id == work.id then
+                []
+
+            else
+                List.head folder.parents
+                    |> Maybe.andThen
+                        (\parent -> Dict.get parent model.folderCache)
+                    |> Maybe.unwrap [ ( folder.name, Just folder ) ]
+                        (\parent -> ( parent.name, Just parent ) :: back parent)
+    in
+    div [ class "ui breadcrumb" ] <|
+        List.intersperse (Html.i [ class "right angle icon divider" ] []) <|
+            flip List.map path <|
+                \( name, mfile ) ->
+                    Html.a [ class "sction", onClick mfile ]
+                        [ text name ]
 
 
 overview : Auth -> Model -> Data -> Project -> Accessor Data (Html Msg)

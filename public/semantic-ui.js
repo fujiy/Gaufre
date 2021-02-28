@@ -27,7 +27,6 @@ class UIDropdown extends HTMLElement {
             e.stopPropagation()
         })
         $(this).dropdown({
-            placeholder: this.getAttribute('placeholder'),
             onChange: value => {
                 this.waitCount++
                 setTimeout(() => {
@@ -43,6 +42,8 @@ class UIDropdown extends HTMLElement {
         })
         this.value = ""
         this.waitCount = 0;
+
+        this.attributeChangedCallback('value', null, this.getAttribute('value'))
     }
 
     static get observedAttributes() { return ['value']}

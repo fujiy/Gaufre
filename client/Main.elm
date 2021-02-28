@@ -89,15 +89,21 @@ update msg model =
                                 (Data.initClient auth user)
                                 (pageView auth <| Page.init url)
                                 (Firestore.init Data.desc)
+
+                        page =
+                            Page.init url
                     in
                     ( SignedIn
                         { auth = auth
-                        , page = Page.init url
+                        , page = page
                         , firestore = firestore
                         , view = Maybe.withDefault (Document "Gaufre" []) mview
                         , url = url
                         }
-                    , cmd
+                    , Cmd.batch
+                        [ cmd
+                        , Page.initialize auth page |> Cmd.map Page
+                        ]
                     )
 
                 _ ->
@@ -151,7 +157,7 @@ update msg model =
                                     , firestore = fs
                                     , view = Maybe.withDefault r.view mview
                                 }
-                            , Cmd.batch [ updcmd, Cmd.map Page cmd ]
+                            , Cmd.batch [ Cmd.map Page cmd, updcmd ]
                             )
 
                 LinkClicked urlRequest ->
@@ -185,7 +191,10 @@ update msg model =
                             , view = Maybe.withDefault r.view mview
                             , url = url
                         }
-                    , cmd
+                    , Cmd.batch
+                        [ Page.initialize r.auth page |> Cmd.map Page
+                        , cmd
+                        ]
                     )
 
                 _ ->

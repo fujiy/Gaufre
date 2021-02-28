@@ -60,13 +60,28 @@ urlChanged model url =
                         [ Url.map (Dashboard Dashboard.init) <|
                             Url.s "dashboard"
                         , Url.map
-                            (\_ _ -> Browse << Browse.initWithWork)
-                            (Url.string </> Url.string <?> Q.string "work")
+                            (\_ _ w f -> Browse <| Browse.initWithWork w f)
+                            (Url.string
+                                </> Url.string
+                                <?> Q.string "work"
+                                <?> Q.string "folder"
+                            )
                         , Url.map (Browse Browse.init) Url.top
                         ]
         ]
         |> flip Url.parse url
         |> Maybe.withDefault model
+
+
+initialize : Auth -> Model -> Cmd Msg
+initialize auth model =
+    case model.page of
+        Browse m ->
+            Browse.initialize auth m
+                |> Cmd.map BrowseMsg
+
+        _ ->
+            Cmd.none
 
 
 update : Auth -> Msg -> Model -> ( Model, Updater Data, Cmd Msg )
@@ -85,8 +100,7 @@ update auth message model =
         ( BrowseMsg msg, Browse m ) ->
             let
                 ( m_, upd, cmd ) =
-                    Browse.update auth msg m <|
-                        Data.currentProject auth model.project
+                    Browse.update auth msg { project = model.project } m
             in
             ( { model | page = Browse m_ }
             , upd
