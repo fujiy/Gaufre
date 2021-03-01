@@ -3,22 +3,22 @@ module Page.Browse exposing (..)
 import Browser.Navigation as Nav
 import Bytes exposing (Bytes)
 import Data exposing (Auth, Data)
-import Data.Client exposing (Client)
 import Data.Project as Project exposing (Part, PartId, Process, ProcessId, Project, newPart, work)
 import Data.User as User exposing (User)
-import Data.Work as Work exposing (Work, WorkId)
+import Data.Work as Work exposing (Work)
 import Dict exposing (Dict)
 import Dict.Extra as Dict
-import Firestore exposing (Id, Lens)
+import Firestore exposing (Id)
 import Firestore.Access as Access exposing (Accessor)
 import Firestore.Lens as Lens exposing (o)
 import Firestore.Path as Path
 import Firestore.Remote as Remote exposing (Remote(..))
 import Firestore.Update as Update exposing (Updater)
 import GDrive exposing (FileMeta)
-import Html exposing (Attribute, Html, button, div, img, span, table, tbody, td, text, th, thead, tr)
-import Html.Attributes exposing (attribute, class, src, style)
-import Html.Events exposing (onClick, onDoubleClick)
+import Html exposing (Html, button, div, img, input, label, node, table, tbody, td, text, th, thead, tr)
+import Html.Attributes exposing (attribute, class, hidden, placeholder, src, style, type_, value)
+import Html.Events as Events exposing (onClick, onDoubleClick, onInput)
+import Json.Decode as Decode
 import List.Extra as List
 import Maybe.Extra as Maybe
 import Result.Extra as Result
@@ -37,6 +37,7 @@ type alias Model =
     , folderId : Maybe GDrive.Id
     , folderCache : Dict GDrive.Id FileMeta
     , downloading : Bool
+    , modal : Maybe String
     }
 
 
@@ -50,6 +51,7 @@ init =
     , folderId = Nothing
     , folderCache = Dict.empty
     , downloading = False
+    , modal = Nothing
     }
 
 
@@ -60,17 +62,19 @@ initWithWork mwork mfolder =
 
 type Msg
     = None
-    | GotFiles (List FileMeta)
+    | GotFiles Bool (List FileMeta)
     | GotFolder FileMeta
     | MoveToWork Process Part Work
     | MoveToFolder Process Part Work FileMeta
     | SelectWork Work.Id Bool Bool
     | SelectFile FileMeta Bool Bool
     | ClearSelection
+    | Modal Bool String
     | AddPart (List ProcessId) PartId Part
     | CreatedWorkFolder ProcessId PartId FileMeta
     | SetWorkStaffs (List Work) (List User.Id)
     | SetWorkReviewers (List Work) (List User.Id)
+    | CreateFolder FileMeta String
     | Download (List FileMeta)
     | DownloadReady FileMeta Bytes
 
@@ -85,7 +89,7 @@ initialize auth model =
             if model.work == model.folderId then
                 Cmd.batch
                     [ GDrive.filesIn auth.token workId
-                        |> Cmd.map (Result.withDefault [] >> GotFiles)
+                        |> Cmd.map (Result.withDefault [] >> GotFiles False)
                     , GDrive.files_get auth.token workId
                         |> Cmd.map
                             (Result.toMaybe >> Maybe.unwrap None GotFolder)
@@ -95,7 +99,7 @@ initialize auth model =
                 Cmd.batch
                     [ GDrive.filesIn auth.token
                         (Maybe.withDefault workId model.folderId)
-                        |> Cmd.map (Result.withDefault [] >> GotFiles)
+                        |> Cmd.map (Result.withDefault [] >> GotFiles False)
                     , GDrive.files_get auth.token
                         (Maybe.withDefault workId model.folderId)
                         |> Cmd.map
@@ -115,7 +119,15 @@ update auth msg m model =
             Data.currentProject auth m.project
     in
     case msg of
-        GotFiles files ->
+        GotFiles append files_ ->
+            let
+                files =
+                    if append then
+                        files_ ++ Remote.withDefault [] model.files
+
+                    else
+                        files_
+            in
             ( { model
                 | files = UpToDate files
                 , folderCache =
@@ -199,6 +211,19 @@ update auth msg m model =
             , Cmd.none
             )
 
+        Modal show str ->
+            ( { model
+                | modal =
+                    if show then
+                        Just str
+
+                    else
+                        Nothing
+              }
+            , Update.none
+            , Cmd.none
+            )
+
         ClearSelection ->
             ( { model
                 | workSelection = Set.empty
@@ -258,6 +283,14 @@ update auth msg m model =
                         <|
                             \work -> { work | reviewers = userRefs users }
             , Cmd.none
+            )
+
+        CreateFolder parent name ->
+            ( { model | modal = Nothing }
+            , Update.none
+            , GDrive.createFolder auth.token name [ parent.id ]
+                |> Cmd.map
+                    (Result.unwrap None <| List.singleton >> GotFiles True)
             )
 
         Download files ->
@@ -379,22 +412,31 @@ workView auth model data project workId =
                                     [ class
                                         "ui right floated basic icon buttons"
                                     ]
-                                    [ button
+                                    [ label
                                         [ class "ui button"
                                         , attribute "data-tooltip"
                                             "ファイルをアップロード"
                                         , attribute "data-position"
                                             "bottom center"
                                         ]
-                                        [ icon "cloud upload" ]
+                                        [ icon "cloud upload"
+                                        , input
+                                            [ type_ "file"
+                                            , hidden True
+                                            , attribute "webkitdirectory" ""
+                                            , attribute "multiple" ""
+                                            ]
+                                            []
+                                        ]
                                     , button
                                         [ class "ui button"
                                         , attribute "data-tooltip"
                                             "空のフォルダを作成"
                                         , attribute "data-position"
                                             "bottom center"
+                                        , onClick <| Modal True ""
                                         ]
-                                        [ icon "folder" ]
+                                        [ icon "folder open" ]
                                     , button
                                         [ class "ui button"
                                         , classIf model.downloading "loading"
@@ -450,6 +492,7 @@ workView auth model data project workId =
                     , div [ class "two wide column" ] []
                     ]
                 , actions members [ work ]
+                , createFolderModal model
                 ]
 
 
@@ -508,6 +551,41 @@ breadcrumb model work =
                 \( name, mfile ) ->
                     Html.a [ class "sction", onClick mfile ]
                         [ text name ]
+
+
+createFolderModal : Model -> Html Msg
+createFolderModal model =
+    node "ui-modal"
+        [ boolAttr "show" <| Maybe.isJust model.modal
+        , class "ui mini modal"
+        , Events.on "hide" <| Decode.succeed <| Modal False ""
+        , Events.on "approve" <|
+            Decode.succeed <|
+                Maybe.withDefault None <|
+                    Maybe.map2 CreateFolder model.folder model.modal
+        ]
+        [ div [ class "header" ] [ text "空のフォルダを作成" ]
+        , div
+            [ class "content" ]
+            [ div [ class "ui fluid input select-all" ]
+                [ input
+                    [ type_ "text"
+                    , placeholder "フォルダ名"
+                    , onInput <| Modal True
+                    , value <| Maybe.withDefault "" model.modal
+                    ]
+                    []
+                ]
+            ]
+        , div [ class "actions" ]
+            [ div [ class "ui cancel button" ] [ text "キャンセル" ]
+            , div
+                [ class "ui approve button"
+                , classIf (Maybe.isNothing model.modal) "disabled"
+                ]
+                [ text "作成" ]
+            ]
+        ]
 
 
 overview : Auth -> Model -> Data -> Project -> Accessor Data (Html Msg)

@@ -149,3 +149,9 @@ onChangeValues =
                     String.split "," s
             )
             Events.targetValue
+
+
+onChange : (String -> msg) -> Attribute msg
+onChange dec =
+    Events.on "Change" <|
+        Decode.map dec Events.targetValue

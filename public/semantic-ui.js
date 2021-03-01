@@ -12,6 +12,12 @@ class UIModal extends HTMLElement {
                 detachable: false,
                 onHide: () => {
                     this.dispatchEvent(new Event('hide'))
+                },
+                onApprove: () => {
+                    this.dispatchEvent(new Event('approve'))
+                },
+                onDeny: () => {
+                    this.dispatchEvent(new Event('deny'))
                 }
             }).modal(arg)
             break
