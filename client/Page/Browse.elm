@@ -8,6 +8,7 @@ import Data.User as User exposing (User)
 import Data.Work as Work exposing (Work)
 import Dict exposing (Dict)
 import Dict.Extra as Dict
+import File exposing (File)
 import Firestore exposing (Id)
 import Firestore.Access as Access exposing (Accessor)
 import Firestore.Lens as Lens exposing (o)
@@ -37,6 +38,7 @@ type alias Model =
     , folderId : Maybe GDrive.Id
     , folderCache : Dict GDrive.Id FileMeta
     , downloading : Bool
+    , uploading : Bool
     , modal : Maybe String
     }
 
@@ -51,6 +53,7 @@ init =
     , folderId = Nothing
     , folderCache = Dict.empty
     , downloading = False
+    , uploading = False
     , modal = Nothing
     }
 
@@ -74,7 +77,8 @@ type Msg
     | CreatedWorkFolder ProcessId PartId FileMeta
     | SetWorkStaffs (List Work) (List User.Id)
     | SetWorkReviewers (List Work) (List User.Id)
-    | CreateFolder FileMeta String
+    | CreateFolder String
+    | Upload (List ( String, File ))
     | Download (List FileMeta)
     | DownloadReady FileMeta Bytes
 
@@ -135,6 +139,7 @@ update auth msg m model =
                         |> List.foldr
                             (\folder -> Dict.insert folder.id folder)
                             model.folderCache
+                , uploading = False
               }
             , Update.none
             , Cmd.none
@@ -285,12 +290,46 @@ update auth msg m model =
             , Cmd.none
             )
 
-        CreateFolder parent name ->
+        CreateFolder name ->
             ( { model | modal = Nothing }
             , Update.none
-            , GDrive.createFolder auth.token name [ parent.id ]
-                |> Cmd.map
-                    (Result.unwrap None <| List.singleton >> GotFiles True)
+            , case model.folder of
+                Nothing ->
+                    Cmd.none
+
+                Just parent ->
+                    GDrive.createFolder auth.token name [ parent.id ]
+                        |> Cmd.map
+                            (Result.unwrap None <|
+                                List.singleton
+                                    >> GotFiles True
+                            )
+            )
+
+        Upload files ->
+            ( { model
+                | uploading =
+                    not (List.isEmpty files) || model.uploading
+              }
+            , Update.none
+            , case model.folder of
+                Nothing ->
+                    Cmd.none
+
+                Just parent ->
+                    GDrive.uploadFiles auth.token parent.id files
+                        |> Cmd.map
+                            (Result.unwrap None <|
+                                List.filterMap
+                                    (\( path, file ) ->
+                                        if path == "" then
+                                            Just file
+
+                                        else
+                                            Nothing
+                                    )
+                                    >> GotFiles True
+                            )
             )
 
         Download files ->
@@ -321,7 +360,7 @@ update auth msg m model =
             , GDrive.download file bytes
             )
 
-        None ->
+        _ ->
             ( model, Update.none, Cmd.none )
 
 
@@ -389,17 +428,6 @@ workView auth model data project workId =
                 ( folders, files ) =
                     Remote.withDefault [] model.files
                         |> List.partition GDrive.isFolder
-
-                downloads =
-                    if Set.isEmpty model.fileSelection then
-                        Maybe.toList model.folder
-
-                    else
-                        Remote.withDefault [] model.files
-                            |> List.filter
-                                (\file ->
-                                    Set.member file.id model.fileSelection
-                                )
             in
             div [ class "ui grid" ]
                 [ div [ class "row" ] []
@@ -408,47 +436,7 @@ workView auth model data project workId =
                     , div [ class "twelve wide column" ]
                         [ div [ class "ui fluid card" ]
                             [ div [ class "content" ]
-                                [ div
-                                    [ class
-                                        "ui right floated basic icon buttons"
-                                    ]
-                                    [ label
-                                        [ class "ui button"
-                                        , attribute "data-tooltip"
-                                            "ファイルをアップロード"
-                                        , attribute "data-position"
-                                            "bottom center"
-                                        ]
-                                        [ icon "cloud upload"
-                                        , input
-                                            [ type_ "file"
-                                            , hidden True
-                                            , attribute "webkitdirectory" ""
-                                            , attribute "multiple" ""
-                                            ]
-                                            []
-                                        ]
-                                    , button
-                                        [ class "ui button"
-                                        , attribute "data-tooltip"
-                                            "空のフォルダを作成"
-                                        , attribute "data-position"
-                                            "bottom center"
-                                        , onClick <| Modal True ""
-                                        ]
-                                        [ icon "folder open" ]
-                                    , button
-                                        [ class "ui button"
-                                        , classIf model.downloading "loading"
-                                        , attributeIf (not model.downloading)
-                                            "data-tooltip"
-                                            "ダウンロード"
-                                        , attribute "data-position"
-                                            "bottom center"
-                                        , onClick <| Download downloads
-                                        ]
-                                        [ icon "download" ]
-                                    ]
+                                [ fileActions model
                                 , div [ class "header" ] [ text workName ]
                                 , div [ class "meta" ]
                                     [ breadcrumb model work
@@ -527,6 +515,58 @@ fileCard model process part work file =
         ]
 
 
+fileActions : Model -> Html Msg
+fileActions model =
+    let
+        downloads =
+            if Set.isEmpty model.fileSelection then
+                Maybe.toList model.folder
+
+            else
+                Remote.withDefault [] model.files
+                    |> List.filter
+                        (\file ->
+                            Set.member file.id model.fileSelection
+                        )
+    in
+    div
+        [ class "ui right floated basic icon buttons" ]
+        [ label
+            [ class "ui button"
+            , classIf model.uploading "loading"
+            , attributeIf (not model.uploading)
+                "data-tooltip"
+                "ファイルまたはフォルダをアップロード"
+            , attribute "data-position" "bottom center"
+            ]
+            [ icon "cloud upload"
+            , input
+                [ type_ "file"
+                , hidden True
+                , attribute "webkitdirectory" ""
+                , attribute "multiple" ""
+                , onChangeFiles Upload
+                ]
+                []
+            ]
+        , button
+            [ class "ui button"
+            , attribute "data-tooltip" "空のフォルダを作成"
+            , attribute "data-position" "bottom center"
+            , onClick <| Modal True ""
+            ]
+            [ icon "folder open" ]
+        , button
+            [ class "ui button"
+            , classIf model.downloading "loading"
+            , attributeIf (not model.downloading) "data-tooltip" "ダウンロード"
+            , attribute "data-position" "bottom center"
+            , onClick <| Download downloads
+            ]
+            [ icon "download" ]
+        ]
+
+
 breadcrumb : Model -> Work -> Html (Maybe FileMeta)
 breadcrumb model work =
     let
@@ -562,7 +602,7 @@ createFolderModal model =
         , Events.on "approve" <|
             Decode.succeed <|
                 Maybe.withDefault None <|
-                    Maybe.map2 CreateFolder model.folder model.modal
+                    Maybe.map CreateFolder model.modal
         ]
         [ div [ class "header" ] [ text "空のフォルダを作成" ]
         , div

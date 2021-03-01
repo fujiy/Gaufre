@@ -2,6 +2,7 @@ module Util exposing (..)
 
 import Array exposing (Array)
 import Array.Extra as Array
+import File exposing (File)
 import Html exposing (Attribute, Html, text)
 import Html.Attributes exposing (attribute, class, style)
 import Html.Events as Events exposing (stopPropagationOn)
@@ -149,6 +150,34 @@ onChangeValues =
                     String.split "," s
             )
             Events.targetValue
+
+
+onChangeFiles : (List ( String, File ) -> a) -> Attribute a
+onChangeFiles dec =
+    Events.on "change" <|
+        Decode.at [ "target", "files" ] <|
+            Decode.map dec <|
+                Decode.list <|
+                    Decode.map2
+                        (\mpath file ->
+                            case mpath of
+                                Nothing ->
+                                    ( "", file )
+
+                                Just "" ->
+                                    ( "", file )
+
+                                Just path ->
+                                    ( String.dropRight
+                                        (String.length (File.name file) + 1)
+                                        path
+                                    , file
+                                    )
+                        )
+                        (Decode.maybe <|
+                            Decode.field "webkitRelativePath" Decode.string
+                        )
+                        File.decoder
 
 
 onChange : (String -> msg) -> Attribute msg
