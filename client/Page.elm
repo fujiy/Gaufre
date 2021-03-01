@@ -9,7 +9,7 @@ import Firestore.Access as Access exposing (Accessor)
 import Firestore.Lens as Lens exposing (o)
 import Firestore.Path as Path
 import Firestore.Update as Update exposing (Updater)
-import Html exposing (Html, a, div, i, map, text)
+import Html exposing (Html, a, div, map, text)
 import Html.Attributes as Html exposing (class, href, style)
 import Html.Events exposing (onClick)
 import Maybe.Extra as Maybe
@@ -114,20 +114,11 @@ update auth message model =
 view : Auth -> Model -> Data -> Accessor Data (Browser.Document Msg)
 view auth model data =
     let
-        projectAndPaths =
+        project =
             Access.access
                 (o (Data.currentProject auth model.project) Lens.get)
                 data
                 |> Access.maybe
-                |> Access.withPaths
-
-        project =
-            Access.map Tuple.second projectAndPaths
-
-        projectId =
-            Access.map
-                (Tuple.first >> List.head >> Maybe.andThen Path.getLast)
-                projectAndPaths
     in
     Access.map (Browser.Document "Gaufre") <|
         Access.list <|
@@ -135,7 +126,7 @@ view auth model data =
             , Access.map
                 (\html ->
                     div
-                        [ class "pusher"
+                        [ class "pusher select-none"
                         , style "width" "calc(100% - 210px)"
                         , style "margin-left" "210px"
                         ]
@@ -205,13 +196,9 @@ sidemenu auth model data mproject =
                     , classIf pg.dashboard "active"
                     , link "dashboard"
                     ]
-                    [ i [ class "columns icon" ] []
-                    , text "Dashboard"
-                    ]
+                    [ icon "columns", text "Dashboard" ]
                 , a [ class "item", classIf pg.browse "active", link "" ]
-                    [ i [ class "th icon" ] []
-                    , text "Browse"
-                    ]
+                    [ icon "th", text "Browse" ]
                 ]
 
 

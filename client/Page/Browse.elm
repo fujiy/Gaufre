@@ -1,6 +1,7 @@
 module Page.Browse exposing (..)
 
 import Browser.Navigation as Nav
+import Bytes exposing (Bytes)
 import Data exposing (Auth, Data)
 import Data.Client exposing (Client)
 import Data.Project as Project exposing (Part, PartId, Process, ProcessId, Project, newPart, work)
@@ -15,35 +16,40 @@ import Firestore.Path as Path
 import Firestore.Remote as Remote exposing (Remote(..))
 import Firestore.Update as Update exposing (Updater)
 import GDrive exposing (FileMeta)
-import Html exposing (Attribute, Html, div, i, img, span, table, tbody, td, text, th, thead, tr)
-import Html.Attributes exposing (class, src, style)
+import Html exposing (Attribute, Html, button, div, img, span, table, tbody, td, text, th, thead, tr)
+import Html.Attributes exposing (attribute, class, src, style)
 import Html.Events exposing (onClick, onDoubleClick)
 import List.Extra as List
 import Maybe.Extra as Maybe
+import Result.Extra as Result
 import Set exposing (Set)
 import Url.Builder as Url
-import Util exposing (classIf, flip, flip2, onDragEnter, onMouseDownStop)
+import Util exposing (..)
 import View.Button as Button
 
 
 type alias Model =
     { work : Maybe Work.Id
-    , selection : Set Id
+    , workSelection : Set Id
+    , fileSelection : Set Id
     , files : Remote (List FileMeta)
     , folder : Maybe FileMeta
     , folderId : Maybe GDrive.Id
     , folderCache : Dict GDrive.Id FileMeta
+    , downloading : Bool
     }
 
 
 init : Model
 init =
     { work = Nothing
-    , selection = Set.empty
+    , workSelection = Set.empty
+    , fileSelection = Set.empty
     , files = Loading
     , folder = Nothing
     , folderId = Nothing
     , folderCache = Dict.empty
+    , downloading = False
     }
 
 
@@ -59,11 +65,14 @@ type Msg
     | MoveToWork Process Part Work
     | MoveToFolder Process Part Work FileMeta
     | SelectWork Work.Id Bool Bool
+    | SelectFile FileMeta Bool Bool
     | ClearSelection
     | AddPart (List ProcessId) PartId Part
     | CreatedWorkFolder ProcessId PartId FileMeta
     | SetWorkStaffs (List Work) (List User.Id)
     | SetWorkReviewers (List Work) (List User.Id)
+    | Download (List FileMeta)
+    | DownloadReady FileMeta Bytes
 
 
 initialize : Auth -> Model -> Cmd Msg
@@ -75,7 +84,7 @@ initialize auth model =
         Just workId ->
             if model.work == model.folderId then
                 Cmd.batch
-                    [ GDrive.files auth.token workId
+                    [ GDrive.filesIn auth.token workId
                         |> Cmd.map (Result.withDefault [] >> GotFiles)
                     , GDrive.files_get auth.token workId
                         |> Cmd.map
@@ -84,7 +93,7 @@ initialize auth model =
 
             else
                 Cmd.batch
-                    [ GDrive.files auth.token
+                    [ GDrive.filesIn auth.token
                         (Maybe.withDefault workId model.folderId)
                         |> Cmd.map (Result.withDefault [] >> GotFiles)
                     , GDrive.files_get auth.token
@@ -150,7 +159,7 @@ update auth msg m model =
 
         SelectWork workId select clear ->
             ( { model
-                | selection =
+                | workSelection =
                     (if select then
                         Set.insert
 
@@ -162,7 +171,28 @@ update auth msg m model =
                             Set.empty
 
                          else
-                            model.selection
+                            model.workSelection
+                        )
+              }
+            , Update.none
+            , Cmd.none
+            )
+
+        SelectFile file select clear ->
+            ( { model
+                | fileSelection =
+                    (if select then
+                        Set.insert
+
+                     else
+                        Set.remove
+                    )
+                        file.id
+                        (if clear then
+                            Set.empty
+
+                         else
+                            model.fileSelection
                         )
               }
             , Update.none
@@ -170,7 +200,10 @@ update auth msg m model =
             )
 
         ClearSelection ->
-            ( { model | selection = Set.empty }
+            ( { model
+                | workSelection = Set.empty
+                , fileSelection = Set.empty
+              }
             , Update.none
             , Cmd.none
             )
@@ -227,7 +260,35 @@ update auth msg m model =
             , Cmd.none
             )
 
-        _ ->
+        Download files ->
+            ( { model
+                | downloading =
+                    not (List.isEmpty files) || model.downloading
+              }
+            , Update.none
+            , List.map
+                (\file ->
+                    if GDrive.isFolder file then
+                        GDrive.getZip auth.token file
+                            |> Cmd.map
+                                (Result.unwrap None <| DownloadReady file)
+
+                    else
+                        GDrive.getData auth.token file
+                            |> Cmd.map
+                                (Result.unwrap None <| DownloadReady file)
+                )
+                files
+                |> Cmd.batch
+            )
+
+        DownloadReady file bytes ->
+            ( { model | downloading = False }
+            , Update.none
+            , GDrive.download file bytes
+            )
+
+        None ->
             ( model, Update.none, Cmd.none )
 
 
@@ -295,6 +356,17 @@ workView auth model data project workId =
                 ( folders, files ) =
                     Remote.withDefault [] model.files
                         |> List.partition GDrive.isFolder
+
+                downloads =
+                    if Set.isEmpty model.fileSelection then
+                        Maybe.toList model.folder
+
+                    else
+                        Remote.withDefault [] model.files
+                            |> List.filter
+                                (\file ->
+                                    Set.member file.id model.fileSelection
+                                )
             in
             div [ class "ui grid" ]
                 [ div [ class "row" ] []
@@ -303,28 +375,64 @@ workView auth model data project workId =
                     , div [ class "twelve wide column" ]
                         [ div [ class "ui fluid card" ]
                             [ div [ class "content" ]
-                                [ div [ class "header" ] [ text workName ]
-                                , breadcrumb model work
-                                    |> Html.map
-                                        (Maybe.unwrap
-                                            (MoveToWork process part work)
-                                            (MoveToFolder process part work)
-                                        )
+                                [ div
+                                    [ class
+                                        "ui right floated basic icon buttons"
+                                    ]
+                                    [ button
+                                        [ class "ui button"
+                                        , attribute "data-tooltip"
+                                            "ファイルをアップロード"
+                                        , attribute "data-position"
+                                            "bottom center"
+                                        ]
+                                        [ icon "cloud upload" ]
+                                    , button
+                                        [ class "ui button"
+                                        , attribute "data-tooltip"
+                                            "空のフォルダを作成"
+                                        , attribute "data-position"
+                                            "bottom center"
+                                        ]
+                                        [ icon "folder" ]
+                                    , button
+                                        [ class "ui button"
+                                        , classIf model.downloading "loading"
+                                        , attributeIf (not model.downloading)
+                                            "data-tooltip"
+                                            "ダウンロード"
+                                        , attribute "data-position"
+                                            "bottom center"
+                                        , onClick <| Download downloads
+                                        ]
+                                        [ icon "download" ]
+                                    ]
+                                , div [ class "header" ] [ text workName ]
+                                , div [ class "meta" ]
+                                    [ breadcrumb model work
+                                        |> Html.map
+                                            (Maybe.unwrap
+                                                (MoveToWork process part work)
+                                                (MoveToFolder process part work)
+                                            )
+                                    ]
                                 ]
-                            , div [ class "content" ]
+                            , div
+                                [ class "content"
+                                , onMouseDownStop ClearSelection
+                                ]
                                 [ div
                                     [ class "ui link three stackable cards" ]
                                   <|
                                     List.map
-                                        (folderCard
-                                            >> Html.map
-                                                (MoveToFolder process part work)
-                                        )
+                                        (fileCard model process part work)
                                         folders
                                 , div
                                     [ class "ui link three stackable cards" ]
                                   <|
-                                    List.map fileCard files
+                                    List.map
+                                        (fileCard model process part work)
+                                        files
                                 , case model.files of
                                     Loading ->
                                         div [ class "ui text loader" ]
@@ -345,25 +453,31 @@ workView auth model data project workId =
                 ]
 
 
-fileCard : FileMeta -> Html msg
-fileCard file =
-    div [ class "card" ]
-        [ div [ class "square image" ]
-            [ img [ src file.thumbnailLink ] [] ]
-        , div [ class "content" ]
-            [ img [ src file.iconLink, class "ui right spaced image" ] []
-            , text file.name
-            ]
-        ]
+fileCard : Model -> Process -> Part -> Work -> FileMeta -> Html Msg
+fileCard model process part work file =
+    let
+        selectedOnly =
+            model.fileSelection == Set.singleton file.id
 
+        selected =
+            Set.member file.id model.fileSelection
 
-folderCard : FileMeta -> Html FileMeta
-folderCard file =
+        isFolder =
+            GDrive.isFolder file
+    in
     div
-        [ class "card"
-        , onDoubleClick file
+        [ class "ui card"
+        , styleIf selected "background-color" "#E0E0E0"
+        , style "transition" "background-color 0.2s"
+        , onMouseDownStop <| SelectFile file (not selectedOnly) True
+        , attrIf isFolder <|
+            onDoubleClick <|
+                MoveToFolder process part work file
         ]
-        [ div [ class "content" ]
+        [ unless isFolder <|
+            div [ class "square image" ]
+                [ img [ src file.thumbnailLink ] [] ]
+        , div [ class "content" ]
             [ img [ src file.iconLink, class "ui right spaced image" ] []
             , text file.name
             ]
@@ -389,7 +503,7 @@ breadcrumb model work =
                         (\parent -> ( parent.name, Just parent ) :: back parent)
     in
     div [ class "ui breadcrumb" ] <|
-        List.intersperse (Html.i [ class "right angle icon divider" ] []) <|
+        List.intersperse (icon "right angle divider") <|
             flip List.map path <|
                 \( name, mfile ) ->
                     Html.a [ class "sction", onClick mfile ]
@@ -435,8 +549,8 @@ overview auth model data project =
                                     |> Dict.fromList
                             )
 
-                selection =
-                    List.filter (isSelected model.selection) works_
+                workSelection =
+                    List.filter (isSelected model.workSelection) works_
             in
             div
                 [ style "min-height" "100vh"
@@ -451,7 +565,7 @@ overview auth model data project =
                         List.map (tableRow model processes works) parts
                             ++ [ newPartButton project ]
                     ]
-                , actions members selection
+                , actions members workSelection
                 ]
 
 
@@ -463,7 +577,7 @@ tableHeader model processes =
                 (\( id, process ) ->
                     let
                         selected =
-                            Set.member id model.selection
+                            Set.member id model.workSelection
                     in
                     th
                         [ class "selectable"
@@ -485,7 +599,7 @@ tableRow :
 tableRow model processes works ( partId, part ) =
     let
         selected =
-            Set.member partId model.selection
+            Set.member partId model.workSelection
     in
     tr [] <|
         td
@@ -509,19 +623,17 @@ emptyCell : Html msg
 emptyCell =
     td
         [ class "disabled" ]
-        [ i [ class "plus icon" ]
-            []
-        ]
+        [ icon "plus" ]
 
 
 workCell : Model -> Process -> Part -> Work -> Html Msg
 workCell model process part work =
     let
         selected =
-            isSelected model.selection work
+            isSelected model.workSelection work
 
         selectedOnly =
-            model.selection == Set.singleton work.id
+            model.workSelection == Set.singleton work.id
     in
     td
         [ class "selectable center aligned"
@@ -530,21 +642,20 @@ workCell model process part work =
         , onDragEnter <| SelectWork work.id (not selected) False
         , onDoubleClick <| MoveToWork process part work
         ]
-        [ i [ class <| Work.iconClass <| Work.getStatus work ] []
-        ]
+        [ icon <| Work.iconClass <| Work.getStatus work ]
 
 
 actions : List User -> List Work -> Html Msg
-actions members selection =
+actions members workSelection =
     let
         staffs =
-            gatherList (.staffs >> List.map Firestore.getId) selection
+            gatherList (.staffs >> List.map Firestore.getId) workSelection
 
         reviewers =
-            gatherList (.reviewers >> List.map Firestore.getId) selection
+            gatherList (.reviewers >> List.map Firestore.getId) workSelection
 
         ( bottom, transition ) =
-            if List.isEmpty selection then
+            if List.isEmpty workSelection then
                 ( "-50vh", "" )
 
             else
@@ -570,7 +681,7 @@ actions members selection =
                             members
                             (Dict.keys staffs.all)
                             (Dict.keys staffs.partially)
-                            |> Html.map (SetWorkStaffs selection)
+                            |> Html.map (SetWorkStaffs workSelection)
                         ]
                     , Html.p []
                         [ text "チェック："
@@ -578,7 +689,7 @@ actions members selection =
                             members
                             (Dict.keys reviewers.all)
                             (Dict.keys reviewers.partially)
-                            |> Html.map (SetWorkReviewers selection)
+                            |> Html.map (SetWorkReviewers workSelection)
                         ]
                     ]
                 ]
@@ -609,10 +720,10 @@ newPartButton project =
 
 
 isSelected : Set Id -> Work -> Bool
-isSelected selection work =
-    Set.member work.id selection
-        || Set.member work.process selection
-        || List.any (flip Set.member selection) work.belongsTo
+isSelected workSelection work =
+    Set.member work.id workSelection
+        || Set.member work.process workSelection
+        || List.any (flip Set.member workSelection) work.belongsTo
 
 
 gatherList :

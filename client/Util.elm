@@ -2,8 +2,8 @@ module Util exposing (..)
 
 import Array exposing (Array)
 import Array.Extra as Array
-import Html exposing (Attribute)
-import Html.Attributes exposing (attribute, class)
+import Html exposing (Attribute, Html, text)
+import Html.Attributes exposing (attribute, class, style)
 import Html.Events as Events exposing (stopPropagationOn)
 import Json.Decode as Decode
 import List
@@ -65,11 +65,49 @@ boolAttr name b =
 
 classIf : Bool -> String -> Attribute msg
 classIf cond cls =
+    attrIf cond <| class cls
+
+
+styleIf : Bool -> String -> String -> Attribute msg
+styleIf cond name value =
+    attrIf cond <| style name value
+
+
+attributeIf : Bool -> String -> String -> Attribute msg
+attributeIf cond name value =
+    attrIf cond <| attribute name value
+
+
+attrIf : Bool -> Attribute msg -> Attribute msg
+attrIf cond attr =
     if cond then
-        class cls
+        attr
 
     else
         class ""
+
+
+when : Bool -> Html msg -> Html msg
+when cond html =
+    if cond then
+        html
+
+    else
+        text ""
+
+
+unless : Bool -> Html msg -> Html msg
+unless cond html =
+    if cond then
+        text ""
+
+    else
+        html
+
+
+icon : String -> Html msg
+icon name =
+    Html.i [ class name, class "icon" ] []
 
 
 onMouseDownStop : msg -> Attribute msg

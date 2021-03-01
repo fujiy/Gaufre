@@ -4,12 +4,12 @@ import Dict
 import Dict.Extra as Dict
 import Firestore
 import Firestore.Desc as Desc exposing (DocumentDesc)
-import Html exposing (Html, a, div, img, input, node, option, select, span, text)
-import Html.Attributes as Attr exposing (attribute, class, src, style, type_, value)
-import Html.Events exposing (onInput)
+import Html exposing (Html, a, div, img, input, node, span, text)
+import Html.Attributes as Attr exposing (attribute, class, src, type_)
+import Html.Events
 import List
 import Set
-import Util exposing (classIf, flip, onChangeValues)
+import Util exposing (onChangeValues)
 
 
 type alias Id =

@@ -13,7 +13,7 @@ import Firestore.Path as Path exposing (Id)
 import Firestore.Remote exposing (Remote(..))
 import Firestore.Update as Update exposing (Updater)
 import GDrive
-import Html exposing (Html, a, button, div, i, input, node, text)
+import Html exposing (Html, a, button, div, input, node, text)
 import Html.Attributes exposing (class, href, placeholder, style, type_)
 import Html.Events exposing (on, onClick, onInput)
 import Json.Decode as Decode
@@ -185,7 +185,7 @@ remote r f =
 
         Failure ->
             div [ class "ui negative message" ]
-                [ i [ class "exclamation circle icon" ] [] ]
+                [ icon "exclamation circle" ]
 
         Committing a ->
             div [ class "ui active inverted dimmer" ]
@@ -248,12 +248,7 @@ addProjectCard =
         ]
         [ div [ class "content" ]
             [ div [ class "center aligned header" ]
-                [ i
-                    [ class "plus icon"
-                    , style "margin" "20px"
-                    ]
-                    []
-                ]
+                [ Html.i [ class "plus icon", style "margin" "20px" ] [] ]
             , div [ class "center aligned header" ]
                 [ text "プロジェクトを追加" ]
             ]
@@ -301,7 +296,7 @@ searchModal auth data model =
                                         , onInput Search
                                         ]
                                         []
-                                    , i [ class "search icon" ] []
+                                    , icon "search"
                                     ]
                                 ]
                             , pl
@@ -351,17 +346,17 @@ projectList auth data files =
                                   <|
                                     case status of
                                         Nothing ->
-                                            [ i [ class "plus icon" ] []
+                                            [ icon "plus"
                                             , text "新しく始める"
                                             ]
 
                                         Just False ->
-                                            [ i [ class "sign-in icon" ] []
+                                            [ icon "sign-in"
                                             , text "参加する"
                                             ]
 
                                         Just True ->
-                                            [ i [ class "check icon" ] []
+                                            [ icon "check"
                                             , text "参加済み"
                                             ]
                                 ]

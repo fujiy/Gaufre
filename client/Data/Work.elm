@@ -100,7 +100,7 @@ getStatus work =
 
 iconClass : Status -> String
 iconClass status =
-    (case status of
+    case status of
         NotAssigned ->
             "user times"
 
@@ -115,5 +115,3 @@ iconClass status =
 
         Complete ->
             "check"
-    )
-        ++ " icon"
