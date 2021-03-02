@@ -2,20 +2,18 @@ module Page exposing (..)
 
 import Browser
 import Data exposing (Auth, Data, project)
-import Data.Client as Client
 import Data.Project exposing (Project)
 import Firestore
 import Firestore.Access as Access exposing (Accessor)
 import Firestore.Lens as Lens exposing (o)
-import Firestore.Path as Path
 import Firestore.Update as Update exposing (Updater)
 import Html exposing (Html, a, div, map, text)
 import Html.Attributes as Html exposing (class, href, style)
-import Html.Events exposing (onClick)
 import Maybe.Extra as Maybe
-import Page.Browse as Browse
 import Page.Dashboard as Dashboard
+import Page.Overview as Overview
 import Page.Projects as Projects
+import Page.Work as Work
 import Url exposing (Url)
 import Url.Builder
 import Url.Parser as Url exposing ((</>), (<?>))
@@ -32,13 +30,15 @@ type alias Model =
 type Page
     = Projects Projects.Model
     | Dashboard Dashboard.Model
-    | Browse Browse.Model
+    | Overview Overview.Model
+    | Work Work.Model
 
 
 type Msg
     = ProjectsMsg Projects.Msg
     | DashboardMsg Dashboard.Msg
-    | BrowseMsg Browse.Msg
+    | OverviewMsg Overview.Msg
+    | WorkMsg Work.Msg
     | SignOut
 
 
@@ -60,13 +60,23 @@ urlChanged model url =
                         [ Url.map (Dashboard Dashboard.init) <|
                             Url.s "dashboard"
                         , Url.map
-                            (\_ _ w f -> Browse <| Browse.initWithWork w f)
+                            (\_ _ mw mf ->
+                                Maybe.map
+                                    (\workId ->
+                                        Work <|
+                                            Work.init workId <|
+                                                Maybe.withDefault workId mf
+                                    )
+                                    mw
+                                    |> Maybe.withDefault
+                                        (Overview Overview.init)
+                            )
                             (Url.string
                                 </> Url.string
                                 <?> Q.string "work"
                                 <?> Q.string "folder"
                             )
-                        , Url.map (Browse Browse.init) Url.top
+                        , Url.map (Overview Overview.init) Url.top
                         ]
         ]
         |> flip Url.parse url
@@ -76,9 +86,9 @@ urlChanged model url =
 initialize : Auth -> Model -> Cmd Msg
 initialize auth model =
     case model.page of
-        Browse m ->
-            Browse.initialize auth m
-                |> Cmd.map BrowseMsg
+        Work m ->
+            Work.initialize auth m
+                |> Cmd.map WorkMsg
 
         _ ->
             Cmd.none
@@ -97,14 +107,24 @@ update auth message model =
             , Cmd.map ProjectsMsg cmd
             )
 
-        ( BrowseMsg msg, Browse m ) ->
+        ( OverviewMsg msg, Overview m ) ->
             let
                 ( m_, upd, cmd ) =
-                    Browse.update auth msg { project = model.project } m
+                    Overview.update auth msg { project = model.project } m
             in
-            ( { model | page = Browse m_ }
+            ( { model | page = Overview m_ }
             , upd
-            , Cmd.map BrowseMsg cmd
+            , Cmd.map OverviewMsg cmd
+            )
+
+        ( WorkMsg msg, Work m ) ->
+            let
+                ( m_, upd, cmd ) =
+                    Work.update auth msg { project = model.project } m
+            in
+            ( { model | page = Work m_ }
+            , upd
+            , Cmd.map WorkMsg cmd
             )
 
         _ ->
@@ -144,11 +164,17 @@ view auth model data =
                                 (Dashboard.view auth m data)
                             |> Access.map (map DashboardMsg)
 
-                    Browse m ->
+                    Overview m ->
                         Access.fromJust project
                             |> Access.andThen
-                                (Browse.view auth m data)
-                            |> Access.map (map BrowseMsg)
+                                (Overview.view auth m data)
+                            |> Access.map (map OverviewMsg)
+
+                    Work m ->
+                        Access.fromJust project
+                            |> Access.andThen
+                                (Work.view auth m data)
+                            |> Access.map (map WorkMsg)
             ]
 
 
@@ -169,7 +195,10 @@ sidemenu auth model data mproject =
                 Dashboard _ ->
                     { pg_ | dashboard = True }
 
-                Browse _ ->
+                Overview _ ->
+                    { pg_ | browse = True }
+
+                Work _ ->
                     { pg_ | browse = True }
 
         link p =
@@ -198,7 +227,7 @@ sidemenu auth model data mproject =
                     ]
                     [ icon "columns", text "Dashboard" ]
                 , a [ class "item", classIf pg.browse "active", link "" ]
-                    [ icon "th", text "Browse" ]
+                    [ icon "th", text "Overview" ]
                 ]
 
 
