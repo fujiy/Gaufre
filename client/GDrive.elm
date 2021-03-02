@@ -9,7 +9,7 @@ import Http exposing (Body, Error)
 import Iso8601
 import Json.Decode as Decode exposing (Decoder, bool, string)
 import Json.Decode.Pipeline as Decode exposing (optional, required)
-import Json.Encode as Encode
+import Json.Encode as Encode exposing (Value)
 import Maybe.Extra as Maybe
 import String
 import Task exposing (Task)
@@ -31,6 +31,7 @@ type alias FileMeta =
     { id : Id
     , name : String
     , mimeType : String
+    , trashed : Bool
     , parents : List Id
     , webContentLink : String
     , webViewLink : String
@@ -41,6 +42,24 @@ type alias FileMeta =
     , modifiedTime : Time.Posix
     , size : Int
     }
+
+
+fields : List String
+fields =
+    [ "id"
+    , "name"
+    , "mimeType"
+    , "trashed"
+    , "parents"
+    , "webContentLink"
+    , "webViewLink"
+    , "iconLink"
+    , "hasThumbnail"
+    , "thumbnailLink"
+    , "createdTime"
+    , "modifiedTime"
+    , "size"
+    ]
 
 
 type alias Cache =
@@ -62,6 +81,7 @@ decodeFileMeta =
         |> required "id" string
         |> required "name" string
         |> required "mimeType" string
+        |> required "trashed" bool
         |> required "parents" (Decode.list string)
         |> optional "webContentLink" string ""
         |> required "webViewLink" string
@@ -73,6 +93,40 @@ decodeFileMeta =
         |> optional "size" intString 0
 
 
+type alias Update =
+    { addParentss : List Id
+    , removeParentss : List Id
+    , name : Maybe String
+    , mimeType : Maybe String
+    , modifiedTime : Maybe Time.Posix
+    , trashed : Maybe Bool
+    }
+
+
+update : Update
+update =
+    Update [] [] Nothing Nothing Nothing Nothing
+
+
+encodeUpdate : Update -> Value
+encodeUpdate u =
+    [ ( "name", Maybe.map Encode.string u.name )
+    , ( "mimeType", Maybe.map Encode.string u.mimeType )
+    , ( "modifiedTime", Maybe.map Iso8601.encode u.modifiedTime )
+    , ( "trashed", Maybe.map Encode.bool u.trashed )
+    ]
+        |> List.filterMap
+            (\( name, mvalue ) -> Maybe.map (Tuple.pair name) mvalue)
+        |> Encode.object
+
+
+updateParams : Update -> List Url.QueryParameter
+updateParams u =
+    [ Url.string "addParents" <| String.join "," u.addParentss
+    , Url.string "removeParents" <| String.join "," u.removeParentss
+    ]
+
+
 intString : Decoder Int
 intString =
     string
@@ -82,23 +136,6 @@ intString =
                     (Decode.fail "cannnot convert into an int")
                     Decode.succeed
             )
-
-
-fields : List String
-fields =
-    [ "id"
-    , "name"
-    , "mimeType"
-    , "parents"
-    , "webViewLink"
-    , "webContentLink"
-    , "iconLink"
-    , "hasThumbnail"
-    , "thumbnailLink"
-    , "createdTime"
-    , "modifiedTime"
-    , "size"
-    ]
 
 
 fileFields : String
@@ -174,6 +211,31 @@ createFolderTask token name parents =
         decodeFileMeta
 
 
+files_update : Token -> Id -> Update -> Cmd (Result Error FileMeta)
+files_update token id u =
+    request_ token
+        "PATCH"
+        ("files/" ++ id)
+        ((Url.string "fields" <| fileFields) :: updateParams u)
+        (Http.jsonBody <| encodeUpdate u)
+        decodeFileMeta
+
+
+files_update_Task : Token -> Id -> Update -> Task Error FileMeta
+files_update_Task token id u =
+    requestTask token
+        "PATCH"
+        ("files/" ++ id)
+        ((Url.string "fields" <| fileFields) :: updateParams u)
+        (Http.jsonBody <| encodeUpdate u)
+        decodeFileMeta
+
+
+files_delete : Token -> Id -> Cmd (Result Error ())
+files_delete token id =
+    request token "DELETE" ("file/" ++ id) [] (Decode.succeed ())
+
+
 files_create_Task : Token -> String -> List Id -> File -> Task Error FileMeta
 files_create_Task token name parents file =
     Http.task
@@ -195,20 +257,15 @@ files_create_Task token name parents file =
         }
         |> Task.andThen
             (\file_ ->
-                requestTask token
-                    "PATCH"
-                    ("files/" ++ file_.id)
-                    [ Url.string "fields" fileFields
-                    , Url.string "addParents" <| String.join "," parents
-                    ]
-                    (Encode.object
-                        [ ( "name", Encode.string name )
-                        , ( "mimeType", Encode.string <| File.mime file )
-                        ]
-                        |> Http.jsonBody
-                    )
-                    decodeFileMeta
+                files_update_Task token
+                    file_.id
+                    { update
+                        | addParentss = parents
+                        , name = Just name
+                        , mimeType = Just <| File.mime file
+                    }
             )
+        |> Task.mapError (Debug.log "ERROR")
 
 
 createFileAt :
@@ -232,7 +289,7 @@ createFileAt token parent path file =
                 [ Url.string "q" <|
                     "mimeType = 'application/vnd.google-apps.folder' and "
                         ++ ("'" ++ parent ++ "' in parents and ")
-                        ++ ("name = '" ++ name ++ "'")
+                        ++ ("name = '" ++ name ++ "' and trashed = false")
                 ]
                 |> Task.andThen
                     (\fldrs ->
@@ -266,6 +323,8 @@ createFileAt token parent path file =
                                     )
                                 )
                     )
+                |> Task.mapError (Debug.log "ERROR")
+                |> Task.map (Debug.log "SUCCEED")
 
 
 appendPath : String -> String -> String

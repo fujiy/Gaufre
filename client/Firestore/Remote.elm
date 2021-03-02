@@ -41,6 +41,16 @@ withDefault a =
     toMaybe >> Maybe.withDefault a
 
 
+unwrap : b -> (a -> b) -> Remote a -> b
+unwrap b f r =
+    case toMaybe r of
+        Nothing ->
+            b
+
+        Just a ->
+            f a
+
+
 map : (a -> b) -> Remote a -> Remote b
 map f r =
     case r of

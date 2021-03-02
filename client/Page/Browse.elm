@@ -39,8 +39,17 @@ type alias Model =
     , folderCache : Dict GDrive.Id FileMeta
     , downloading : Bool
     , uploading : Bool
-    , modal : Maybe String
+    , modal : Modal
     }
+
+
+type Modal
+    = Hidden
+    | DeleteModal
+    | RenameModal String
+    | UploadModal (List ( String, File ))
+    | CreateFolderModal String
+    | DownloadModal
 
 
 init : Model
@@ -54,7 +63,7 @@ init =
     , folderCache = Dict.empty
     , downloading = False
     , uploading = False
-    , modal = Nothing
+    , modal = Hidden
     }
 
 
@@ -66,19 +75,22 @@ initWithWork mwork mfolder =
 type Msg
     = None
     | GotFiles Bool (List FileMeta)
+    | RemoveFile FileMeta
     | GotFolder FileMeta
     | MoveToWork Process Part Work
     | MoveToFolder Process Part Work FileMeta
     | SelectWork Work.Id Bool Bool
     | SelectFile FileMeta Bool Bool
     | ClearSelection
-    | Modal Bool String
+    | ModalState Modal
     | AddPart (List ProcessId) PartId Part
     | CreatedWorkFolder ProcessId PartId FileMeta
     | SetWorkStaffs (List Work) (List User.Id)
     | SetWorkReviewers (List Work) (List User.Id)
-    | CreateFolder String
+    | Rename String FileMeta
+    | Delete (List FileMeta)
     | Upload (List ( String, File ))
+    | CreateFolder String
     | Download (List FileMeta)
     | DownloadReady FileMeta Bytes
 
@@ -123,11 +135,19 @@ update auth msg m model =
             Data.currentProject auth m.project
     in
     case msg of
-        GotFiles append files_ ->
+        GotFiles append files__ ->
             let
+                files_ =
+                    List.filter (not << .trashed) files__
+
                 files =
                     if append then
-                        files_ ++ Remote.withDefault [] model.files
+                        Remote.withDefault [] model.files
+                            |> List.filter
+                                (\file ->
+                                    List.all (\f -> f.id /= file.id) files_
+                                )
+                            |> List.append files_
 
                     else
                         files_
@@ -140,6 +160,17 @@ update auth msg m model =
                             (\folder -> Dict.insert folder.id folder)
                             model.folderCache
                 , uploading = False
+              }
+            , Update.none
+            , Cmd.none
+            )
+
+        RemoveFile file ->
+            ( { model
+                | files =
+                    Remote.map
+                        (List.filter (.id >> (/=) file.id))
+                        model.files
               }
             , Update.none
             , Cmd.none
@@ -216,15 +247,8 @@ update auth msg m model =
             , Cmd.none
             )
 
-        Modal show str ->
-            ( { model
-                | modal =
-                    if show then
-                        Just str
-
-                    else
-                        Nothing
-              }
+        ModalState modal ->
+            ( { model | modal = modal }
             , Update.none
             , Cmd.none
             )
@@ -290,8 +314,33 @@ update auth msg m model =
             , Cmd.none
             )
 
+        Rename name file ->
+            ( model
+            , Update.none
+            , GDrive.files_update auth.token
+                file.id
+                { gdriveUpdate | name = Just name }
+                |> Cmd.map
+                    (Result.unwrap None <|
+                        List.singleton
+                            >> GotFiles True
+                    )
+            )
+
+        Delete files ->
+            ( model
+            , Update.none
+            , Cmd.batch <|
+                flip List.map files <|
+                    \file ->
+                        GDrive.files_update auth.token
+                            file.id
+                            { gdriveUpdate | trashed = Just True }
+                            |> Cmd.map (\_ -> RemoveFile file)
+            )
+
         CreateFolder name ->
-            ( { model | modal = Nothing }
+            ( { model | modal = Hidden }
             , Update.none
             , case model.folder of
                 Nothing ->
@@ -318,6 +367,7 @@ update auth msg m model =
 
                 Just parent ->
                     GDrive.uploadFiles auth.token parent.id files
+                        |> Cmd.map (Result.mapError <| Debug.log "ERROR")
                         |> Cmd.map
                             (Result.unwrap None <|
                                 List.filterMap
@@ -480,7 +530,7 @@ workView auth model data project workId =
                     , div [ class "two wide column" ] []
                     ]
                 , actions members [ work ]
-                , createFolderModal model
+                , actionModal model
                 ]
 
 
@@ -488,7 +538,8 @@ fileCard : Model -> Process -> Part -> Work -> FileMeta -> Html Msg
 fileCard model process part work file =
     let
         selectedOnly =
-            model.fileSelection == Set.singleton file.id
+            (Set.size model.fileSelection == 1)
+                && Set.member file.id model.fileSelection
 
         selected =
             Set.member file.id model.fileSelection
@@ -517,21 +568,34 @@ fileCard model process part work file =
 
 fileActions : Model -> Html Msg
 fileActions model =
-    let
-        downloads =
-            if Set.isEmpty model.fileSelection then
-                Maybe.toList model.folder
-
-            else
-                Remote.withDefault [] model.files
-                    |> List.filter
-                        (\file ->
-                            Set.member file.id model.fileSelection
-                        )
-    in
     div
         [ class "ui right floated basic icon buttons" ]
-        [ label
+        [ when (Set.size model.fileSelection == 1) <|
+            button
+                [ class "ui button"
+                , attribute "data-tooltip" "名前を変更"
+                , attribute "data-position" "bottom center"
+                , onClick <|
+                    ModalState <|
+                        RenameModal <|
+                            Maybe.unwrap "" .name <|
+                                Maybe.andThen2
+                                    (\id -> List.find <| \file -> file.id == id)
+                                    (Set.toList model.fileSelection
+                                        |> List.head
+                                    )
+                                    (Remote.toMaybe model.files)
+                ]
+                [ icon "edit" ]
+        , when (not <| Set.isEmpty model.fileSelection) <|
+            button
+                [ class "ui button"
+                , attribute "data-tooltip" "削除"
+                , attribute "data-position" "bottom center"
+                , onClick <| ModalState <| DeleteModal
+                ]
+                [ icon "trash alternate" ]
+        , label
             [ class "ui button"
             , classIf model.uploading "loading"
             , attributeIf (not model.uploading)
@@ -545,7 +609,7 @@ fileActions model =
                 , hidden True
                 , attribute "webkitdirectory" ""
                 , attribute "multiple" ""
-                , onChangeFiles Upload
+                , onChangeFiles <| ModalState << UploadModal
                 ]
                 []
             ]
@@ -553,7 +617,7 @@ fileActions model =
             [ class "ui button"
             , attribute "data-tooltip" "空のフォルダを作成"
             , attribute "data-position" "bottom center"
-            , onClick <| Modal True ""
+            , onClick <| ModalState <| CreateFolderModal ""
             ]
             [ icon "folder open" ]
         , button
@@ -561,7 +625,7 @@ fileActions model =
             , classIf model.downloading "loading"
             , attributeIf (not model.downloading) "data-tooltip" "ダウンロード"
             , attribute "data-position" "bottom center"
-            , onClick <| Download downloads
+            , onClick <| ModalState DownloadModal
             ]
             [ icon "download" ]
         ]
@@ -593,39 +657,168 @@ breadcrumb model work =
                         [ text name ]
 
 
-createFolderModal : Model -> Html Msg
-createFolderModal model =
+actionModal : Model -> Html Msg
+actionModal model =
+    let
+        selection =
+            Remote.unwrap []
+                (List.filter <|
+                    \file -> Set.member file.id model.fileSelection
+                )
+                model.files
+
+        single =
+            case selection of
+                [ file ] ->
+                    Just file
+
+                _ ->
+                    Nothing
+
+        includesFile =
+            List.any (not << GDrive.isFolder) selection
+
+        includesFolder =
+            List.any GDrive.isFolder selection
+
+        title =
+            if includesFile && includesFolder then
+                "ファイルとフォルダ"
+
+            else if includesFile then
+                "ファイル"
+
+            else
+                "フォルダ"
+    in
     node "ui-modal"
-        [ boolAttr "show" <| Maybe.isJust model.modal
-        , class "ui mini modal"
-        , Events.on "hide" <| Decode.succeed <| Modal False ""
+        [ boolAttr "show" <| model.modal /= Hidden
+        , class "ui tiny modal"
+        , Events.on "hide" <| Decode.succeed <| ModalState Hidden
         , Events.on "approve" <|
             Decode.succeed <|
-                Maybe.withDefault None <|
-                    Maybe.map CreateFolder model.modal
+                case model.modal of
+                    RenameModal name ->
+                        single |> Maybe.unwrap None (Rename name)
+
+                    UploadModal files ->
+                        Upload files
+
+                    CreateFolderModal name ->
+                        CreateFolder name
+
+                    DownloadModal ->
+                        Download <|
+                            if List.isEmpty selection then
+                                Maybe.toList model.folder
+
+                            else
+                                selection
+
+                    _ ->
+                        None
         ]
-        [ div [ class "header" ] [ text "空のフォルダを作成" ]
-        , div
-            [ class "content" ]
-            [ div [ class "ui fluid input select-all" ]
-                [ input
-                    [ type_ "text"
-                    , placeholder "フォルダ名"
-                    , onInput <| Modal True
-                    , value <| Maybe.withDefault "" model.modal
+    <|
+        case model.modal of
+            RenameModal name ->
+                [ div [ class "header" ] [ text <| title ++ "の名前を変更" ]
+                , div
+                    [ class "content" ]
+                    [ div [ class "ui fluid input select-all" ]
+                        [ input
+                            [ type_ "text"
+                            , placeholder <| title ++ "名"
+                            , onInput <| RenameModal >> ModalState
+                            , value name
+                            ]
+                            []
+                        ]
                     ]
-                    []
+                , div [ class "actions" ]
+                    [ div [ class "ui deny button" ] [ text "キャンセル" ]
+                    , div
+                        [ class "ui positive button"
+                        , classIf (name == "") "disabled"
+                        ]
+                        [ text "変更" ]
+                    ]
                 ]
-            ]
-        , div [ class "actions" ]
-            [ div [ class "ui cancel button" ] [ text "キャンセル" ]
-            , div
-                [ class "ui approve button"
-                , classIf (Maybe.isNothing model.modal) "disabled"
+
+            DeleteModal ->
+                [ div [ class "header" ]
+                    [ text <|
+                        (String.fromInt <| List.length selection)
+                            ++ ("個の" ++ title ++ "を削除")
+                    ]
+                , div [ class "actions" ]
+                    [ div
+                        [ class "ui negative button"
+                        , onClick <| Delete selection
+                        ]
+                        [ text "削除" ]
+                    , div
+                        [ class "ui deny button"
+                        , onClick <| ModalState Hidden
+                        ]
+                        [ text "キャンセル" ]
+                    ]
                 ]
-                [ text "作成" ]
-            ]
-        ]
+
+            UploadModal files ->
+                [ div [ class "header" ]
+                    [ text <|
+                        String.fromInt (List.length files)
+                            ++ "個のファイルをアップロード"
+                    ]
+                , div [ class "actions" ]
+                    [ div [ class "ui deny button" ] [ text "キャンセル" ]
+                    , div [ class "ui positive button" ] [ text "アップロード" ]
+                    ]
+                ]
+
+            CreateFolderModal name ->
+                [ div [ class "header" ] [ text "空のフォルダを作成" ]
+                , div
+                    [ class "content" ]
+                    [ div [ class "ui fluid input select-all" ]
+                        [ input
+                            [ type_ "text"
+                            , placeholder "フォルダ名"
+                            , onInput <| CreateFolderModal >> ModalState
+                            , value name
+                            ]
+                            []
+                        ]
+                    ]
+                , div [ class "actions" ]
+                    [ div [ class "ui deny button" ] [ text "キャンセル" ]
+                    , div
+                        [ class "ui positive button"
+                        , classIf (name == "") "disabled"
+                        ]
+                        [ text "作成" ]
+                    ]
+                ]
+
+            DownloadModal ->
+                [ div [ class "header" ]
+                    [ case List.length selection of
+                        0 ->
+                            text "フォルダをダウンロード"
+
+                        n ->
+                            text <|
+                                (String.fromInt n ++ "個の")
+                                    ++ (title ++ "をダウンロード")
+                    ]
+                , div [ class "actions" ]
+                    [ div [ class "ui deny button" ] [ text "キャンセル" ]
+                    , div [ class "ui positive button" ] [ text "ダウンロード" ]
+                    ]
+                ]
+
+            _ ->
+                []
 
 
 overview : Auth -> Model -> Data -> Project -> Accessor Data (Html Msg)
@@ -922,3 +1115,8 @@ gatherList getter =
         )
         { all = Dict.empty, partially = Dict.empty, notAll = False }
         >> (\r -> { all = r.all, partially = r.partially })
+
+
+gdriveUpdate : GDrive.Update
+gdriveUpdate =
+    GDrive.update
