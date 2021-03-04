@@ -97,8 +97,7 @@ update auth msg m model =
         AddPart processes newId newPart ->
             ( model
             , Update.modify projectLens Project.desc <|
-                \p ->
-                    { p | parts = Dict.insert newId newPart p.parts }
+                \p -> { p | parts = Dict.insert newId newPart p.parts }
             , List.map
                 (\processId ->
                     GDrive.createFolder auth.token

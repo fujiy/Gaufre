@@ -28,6 +28,6 @@ desc =
             (Desc.array Desc.reference)
 
 
-projects : Lens Client (Array (Reference Project.Sub Project))
+projects : Lens Item Client Item (Array (Reference Project.Sub Project))
 projects =
     Lens.lens .projects (\ps c -> { c | projects = ps })

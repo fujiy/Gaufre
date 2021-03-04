@@ -1,63 +1,74 @@
 module Firestore.Access exposing (..)
 
 import Array exposing (Array)
-import Firestore.Internal as Internal exposing (..)
-import Firestore.Path as Path exposing (Path, Paths)
+import Firestore.Internal as I exposing (..)
+import Firestore.Path as Path exposing (Path)
+import Firestore.Path.Map as PathMap
+import Firestore.Path.Map.Slice as Slice exposing (..)
 import Firestore.Remote as Remote exposing (Remote(..))
 import Maybe.Extra as Maybe
 import Util exposing (..)
 
 
 type alias Accessor r a =
-    Internal.Accessor r a
+    I.Accessor Root Item r a
 
 
-success : a -> Accessor r a
+just : a -> I.Accessor x x r a
+just a =
+    I.Accessor Slice.zero (UpToDate a)
+
+
+success : a -> I.Accessor p q r a
 success a =
-    Accessor (Path.rootItem ()) (UpToDate a)
+    I.Accessor Slice.nothing (UpToDate a)
 
 
-failure : Accessor r a
+failure : I.Accessor p q r a
 failure =
-    Accessor Path.empty Failure
+    I.Accessor Slice.nothing Failure
 
 
-map : (a -> b) -> Accessor r a -> Accessor r b
-map f (Accessor paths ra) =
-    Accessor paths <| Remote.map f ra
+map : (a -> b) -> I.Accessor p q r a -> I.Accessor p q r b
+map f (I.Accessor s ra) =
+    I.Accessor s <| Remote.map f ra
 
 
-map2 : (a -> b -> c) -> Accessor r a -> Accessor r b -> Accessor r c
-map2 f (Accessor aps ra) (Accessor bps rb) =
-    Accessor (Path.append aps bps) <| Remote.map2 f ra rb
+map2 :
+    (a -> b -> c)
+    -> I.Accessor p q r a
+    -> I.Accessor p q r b
+    -> I.Accessor p q r c
+map2 f (I.Accessor sa ra) (I.Accessor sb rb) =
+    I.Accessor (Slice.both sa sb) <| Remote.map2 f ra rb
 
 
 map3 :
     (a -> b -> c -> d)
-    -> Accessor r a
-    -> Accessor r b
-    -> Accessor r c
-    -> Accessor r d
-map3 f (Accessor aps ra) (Accessor bps rb) (Accessor cps rc) =
-    Accessor (Path.append aps <| Path.append bps cps) <| Remote.map3 f ra rb rc
+    -> I.Accessor p q r a
+    -> I.Accessor p q r b
+    -> I.Accessor p q r c
+    -> I.Accessor p q r d
+map3 f (I.Accessor sa ra) (I.Accessor sb rb) (I.Accessor sc rc) =
+    I.Accessor (Slice.both sa <| Slice.both sb sc) <| Remote.map3 f ra rb rc
 
 
-mapRemote : (Remote a -> Remote b) -> Accessor r a -> Accessor r b
-mapRemote f (Accessor paths ra) =
-    Accessor paths <| f ra
+mapRemote : (Remote a -> Remote b) -> I.Accessor p q r a -> I.Accessor p q r b
+mapRemote f (I.Accessor s ra) =
+    I.Accessor s <| f ra
 
 
-unremote : Remote (Accessor r a) -> Accessor r a
+unremote : Remote (I.Accessor p q r a) -> I.Accessor p q r a
 unremote ra =
     case ra of
         Failure ->
-            failure
+            I.Accessor Slice.nothing Failure
 
         Loading ->
-            Accessor Path.empty Loading
+            I.Accessor Slice.nothing Loading
 
-        Committing (Accessor paths (UpToDate a)) ->
-            Accessor paths (Committing a)
+        Committing (I.Accessor s (UpToDate a)) ->
+            I.Accessor s (Committing a)
 
         Committing aa ->
             aa
@@ -66,8 +77,8 @@ unremote ra =
             aa
 
 
-toRemote : Accessor r a -> Remote (Accessor r a)
-toRemote (Accessor paths ra) =
+toRemote : I.Accessor p q r a -> Remote (I.Accessor p q r a)
+toRemote (I.Accessor s ra) =
     case ra of
         Failure ->
             Failure
@@ -76,122 +87,122 @@ toRemote (Accessor paths ra) =
             Loading
 
         Committing a ->
-            Committing <| Accessor paths <| UpToDate a
+            Committing <| I.Accessor s <| UpToDate a
 
         UpToDate a ->
-            UpToDate <| Accessor paths <| UpToDate a
+            UpToDate <| I.Accessor s <| UpToDate a
 
 
-remote : Accessor r a -> Accessor r (Remote a)
+remote : I.Accessor p q r a -> I.Accessor p q r (Remote a)
 remote =
     mapRemote UpToDate
 
 
-join : Accessor r (Accessor r a) -> Accessor r a
-join (Accessor paths raa) =
+join : I.Accessor p q r (I.Accessor p q r a) -> I.Accessor p q r a
+join (I.Accessor sp raa) =
     case raa of
         Failure ->
-            Accessor paths Failure
+            I.Accessor sp Failure
 
         Loading ->
-            Accessor paths Loading
+            I.Accessor sp Loading
 
-        Committing (Accessor paths_ (UpToDate a)) ->
-            Accessor (Path.append paths paths_) (Committing a)
+        Committing (I.Accessor ss (UpToDate a)) ->
+            I.Accessor (Slice.both sp ss) (Committing a)
 
-        Committing (Accessor paths_ ra) ->
-            Accessor (Path.append paths paths_) ra
+        Committing (I.Accessor ss ra) ->
+            I.Accessor (Slice.both sp ss) ra
 
-        UpToDate (Accessor paths_ ra) ->
-            Accessor (Path.append paths paths_) ra
+        UpToDate (I.Accessor ss ra) ->
+            I.Accessor (Slice.both sp ss) ra
 
 
-andThen : (a -> Accessor r b) -> Accessor r a -> Accessor r b
+andThen :
+    (a -> I.Accessor p q r b)
+    -> I.Accessor p q r a
+    -> I.Accessor p q r b
 andThen f =
     map f >> join
 
 
 andThen2 :
-    (a -> b -> Accessor r c)
-    -> Accessor r a
-    -> Accessor r b
-    -> Accessor r c
+    (a -> b -> I.Accessor p q r c)
+    -> I.Accessor p q r a
+    -> I.Accessor p q r b
+    -> I.Accessor p q r c
 andThen2 f ra rb =
     map2 f ra rb |> join
 
 
-for : (a -> Accessor r b) -> Accessor r (List a) -> Accessor r (List b)
+for :
+    (a -> I.Accessor p q r b)
+    -> I.Accessor p q r (List a)
+    -> I.Accessor p q r (List b)
 for f ac =
     map (List.map f >> list) ac |> andThen identity
 
 
-forArray : (a -> Accessor r b) -> Accessor r (Array a) -> Accessor r (Array b)
+forArray :
+    (a -> I.Accessor p q r b)
+    -> I.Accessor p q r (Array a)
+    -> I.Accessor p q r (Array b)
 forArray f ac =
     map (Array.map f >> array) ac |> andThen identity
 
 
-list : List (Accessor r a) -> Accessor r (List a)
+list : List (I.Accessor p q r a) -> I.Accessor p q r (List a)
 list =
-    List.foldr (map2 (::)) (Accessor Path.empty <| UpToDate [])
+    List.foldr (map2 (::)) (success [])
 
 
-array : Array (Accessor r a) -> Accessor r (Array a)
+array : Array (I.Accessor p q r a) -> I.Accessor p q r (Array a)
 array =
-    Array.toList >> list >> map Array.fromList
+    Array.foldr (map2 Array.push) (success Array.empty)
 
 
-maps : (List a -> b) -> List (Accessor r a) -> Accessor r b
+maps : (List a -> b) -> List (I.Accessor p q r a) -> I.Accessor p q r b
 maps f =
     map f << list
 
 
-
--- maybe : Maybe (Accessor r a) -> Accessor (Maybe a)
--- maybe m =
---     case m of
---         Nothing ->
---             failure
---         Just (Accessor paths ra) ->
---             Accessor paths <| UpToDate ra
-
-
-maybe : Accessor r a -> Accessor r (Maybe a)
+maybe : I.Accessor p q r a -> I.Accessor p q r (Maybe a)
 maybe =
     mapRemote <| Remote.toMaybe >> UpToDate
 
 
-fromJust : Accessor r (Maybe a) -> Accessor r a
+fromJust : I.Accessor p q r (Maybe a) -> I.Accessor p q r a
 fromJust =
     mapRemote Remote.unmaybe
 
 
-access : Lens a r -> a -> Accessor a r
-access (Lens acc _) a =
-    acc a
+access : Lens Root a q r -> a -> I.Accessor Root q a r
+access (Lens l) =
+    l.access
 
 
-withPaths : Accessor r a -> Accessor r ( List Path, a )
-withPaths (Accessor paths ra) =
-    Accessor paths <|
-        Remote.map
-            (\a -> ( Path.toList paths |> List.map Tuple.first, a ))
-            ra
+
+-- withPaths : I.Accessor p q r a -> I.Accessor p q r ( List Path, a )
+-- withPaths (I.Accessor s ra) =
+--     I.Accessor s <|
+--         Remote.map
+--             (\a -> ( PathMap.toList s |> List.map Tuple.first, a ))
+--             ra
 
 
-accessMap : Lens a r -> a -> (r -> b) -> Accessor a b
-accessMap (Lens acc _) a f =
-    map f <| acc a
+accessMap : Lens p a q r -> a -> (r -> b) -> I.Accessor p q a b
+accessMap (Lens l) a f =
+    map f <| l.access a
 
 
-accessMapMaybe : Lens a r -> a -> (Maybe r -> b) -> Accessor a b
-accessMapMaybe (Lens acc _) a f =
-    map f <| maybe <| acc a
+accessMapMaybe : Lens p a q r -> a -> (Maybe r -> b) -> I.Accessor p q a b
+accessMapMaybe (Lens l) a f =
+    map f <| maybe <| l.access a
 
 
-thenAccess : Lens a r -> Accessor d a -> Accessor d r
-thenAccess l (Accessor paths a) =
+thenAccess : Lens Root a q r -> I.Accessor Root q d a -> I.Accessor Root q d r
+thenAccess l (I.Accessor rs a) =
     let
-        (Accessor paths_ b) =
+        (I.Accessor ss b) =
             Remote.map (access l) a |> unremote
     in
-    Accessor (Path.joinSub paths paths_) b
+    I.Accessor (Slice.both rs ss) b

@@ -3,8 +3,9 @@ module Firestore.Desc exposing (..)
 import Array exposing (Array)
 import Dict exposing (Dict)
 import Firestore.Internal exposing (..)
-import Firestore.Path as Path exposing (Id, Path, PathMap, Paths)
-import Firestore.Remote exposing (Remote(..))
+import Firestore.Path as Path exposing (Id, Path)
+import Firestore.Path.Map as PathMap exposing (Paths)
+import Firestore.Remote as Remote exposing (Remote(..))
 import Json.Decode as Decode exposing (Decoder)
 import Json.Encode as Encode exposing (Value)
 import List.Extra as List
@@ -21,12 +22,12 @@ type alias Encoder a =
     a -> Value
 
 
-type alias Applier a =
-    Applier_ a a
+type alias Applier p a =
+    Applier_ p a a
 
 
-type alias Applier_ l r =
-    PathMap Value -> r -> Result Decode.Error l
+type alias Applier_ p l r =
+    p -> r -> Result Decode.Error l
 
 
 type alias Desc a =
@@ -39,21 +40,21 @@ type DocumentDesc s r
     = DocumentDesc
         { encoder : Encoder (Remote r)
         , decoder : Decoder (Remote r)
-        , applier : Applier s
+        , applier : Applier (PathMap.Doc Value) s
         , empty : s
         }
 
 
 type FirestoreDesc r
     = FirestoreDesc
-        { applier : Applier r
+        { applier : Applier (PathMap.Map Value) r
         , empty : r
         }
 
 
 type CollectionDesc l r
     = CollectionDesc
-        { applier : Applier_ l r
+        { applier : Applier_ (Dict Id (PathMap.Col Value)) l r
         , empty : l
         }
 
@@ -82,7 +83,10 @@ firestore constr rf =
                     , empty = constr
                     }
     in
-    FirestoreDesc c
+    FirestoreDesc
+        { applier = \(PathMap.Root cpvs) cols -> c.applier cpvs cols
+        , empty = c.empty
+        }
 
 
 document : c -> (Field c r -> Field r r) -> DocumentDesc () r
@@ -133,22 +137,22 @@ documentWithIdAndSubs rconstr rf sconstr sf =
     in
     DocumentDesc
         { encoder =
-            encodeRemote <|
+            Remote.encode <|
                 \r ->
                     Encode.object <|
                         List.map (\( name, f ) -> ( name, f r ))
                             (fld "").encoders
         , decoder =
             Decode.andThen
-                (\id -> decodeRemote (fld id).decoder)
+                (\id -> Remote.decode (fld id).decoder)
                 (Decode.field "id" Decode.string)
         , applier =
-            \pv ->
-                if Path.isEmpty pv then
+            \(PathMap.Doc ma d) ->
+                if PathMap.isEmptyDoc <| PathMap.Doc ma d then
                     Ok
 
                 else
-                    cd.applier pv
+                    cd.applier d
         , empty = cd.empty
         }
 
@@ -162,15 +166,18 @@ collection :
 collection name getter (DocumentDesc d) (CollectionDesc c) =
     CollectionDesc
         { applier =
-            \pv r ->
+            \cpvs r ->
                 Result.map2 identity
-                    (c.applier pv r)
+                    (c.applier cpvs r)
                     (let
                         (Collection col) =
                             getter r
 
                         upds =
-                            Path.subMaps <| Path.at name pv
+                            Dict.get name cpvs
+                                |> Maybe.withDefault PathMap.emptyCol
+                                |> PathMap.subDocs
+                                |> Dict.toList
                      in
                      List.foldr
                         (\( id, dpv ) rd ->
@@ -184,7 +191,7 @@ collection name getter (DocumentDesc d) (CollectionDesc c) =
                                     d.applier dpv sub
 
                                 doc_ =
-                                    Path.getRootItem dpv
+                                    PathMap.getDocRoot dpv
                                         |> Maybe.unwrap (Ok doc)
                                             (Decode.decodeValue d.decoder)
                             in
@@ -211,75 +218,18 @@ reference =
             Encode.object [ ( "__path__", path.encoder p ) ]
         )
         (Decode.field "path" Decode.string
-            |> Decode.map (String.split "/" >> Path.fromIds >> Reference)
+            |> Decode.map (Path.fromString >> Reference)
         )
 
 
 remote : Desc a -> Desc (Remote a)
 remote d =
-    Desc (encodeRemote d.encoder) (decodeRemote d.decoder)
+    Desc (Remote.encode d.encoder) (Remote.decode d.decoder)
 
 
-encodeRemote : Encoder a -> Encoder (Remote a)
-encodeRemote enc ra =
-    let
-        ( status, v ) =
-            case ra of
-                Loading ->
-                    ( "loading", Encode.null )
-
-                Failure ->
-                    ( "failure", Encode.null )
-
-                Committing a ->
-                    ( "committing", enc a )
-
-                UpToDate a ->
-                    ( "uptodate", enc a )
-    in
-    Encode.object
-        [ ( "status", Encode.string status )
-        , ( "value", v )
-        ]
-
-
-decodeRemote : Decoder a -> Decoder (Remote a)
-decodeRemote dec =
-    Decode.andThen
-        (\t ->
-            case t of
-                ( "loading", _ ) ->
-                    Decode.succeed Loading
-
-                ( "failure", _ ) ->
-                    Decode.succeed Failure
-
-                ( "committing", Nothing ) ->
-                    Decode.fail "no value"
-
-                ( "committing", Just a ) ->
-                    Decode.succeed <| Committing a
-
-                ( "uptodate", Nothing ) ->
-                    Decode.fail "no value"
-
-                ( "uptodate", Just a ) ->
-                    Decode.succeed <| UpToDate a
-
-                _ ->
-                    Decode.fail "unknown state"
-        )
-    <|
-        Decode.map2 Tuple.pair
-            (Decode.field "status" Decode.string)
-            (Decode.field "value" <| Decode.nullable dec)
-
-
-pathMap : Desc a -> Desc (PathMap a)
-pathMap d =
-    object Path.PathMap <|
-        field "item" Path.getRootItem (nullable d)
-            >> field "sub" Path.subMaps_ (dict <| lazy <| \_ -> pathMap d)
+pathMap : Desc a -> Desc (PathMap.Map a)
+pathMap desc =
+    Desc (PathMap.encode desc.encoder) (PathMap.decode desc.decoder)
 
 
 paths : Desc Paths
@@ -289,7 +239,56 @@ paths =
 
 path : Desc Path
 path =
-    array string
+    Desc Path.encode Path.decode
+
+
+request : Desc Request
+request =
+    Desc
+        (\u ->
+            case u of
+                None ->
+                    Encode.null
+
+                Get ->
+                    Encode.object [ ( "type", Encode.string "get" ) ]
+
+                Set v ->
+                    Encode.object
+                        [ ( "type", Encode.string "set" ), ( "value", v ) ]
+
+                Add v ->
+                    Encode.object
+                        [ ( "type", Encode.string "add" ), ( "value", v ) ]
+
+                Delete ->
+                    Encode.object [ ( "type", Encode.string "delete" ) ]
+        )
+        (Decode.oneOf
+            [ Decode.andThen
+                (\t ->
+                    case t of
+                        "get" ->
+                            Decode.succeed Get
+
+                        "set" ->
+                            Decode.map Set <|
+                                Decode.field "value" Decode.value
+
+                        "add" ->
+                            Decode.map Add <|
+                                Decode.field "value" Decode.value
+
+                        "delete" ->
+                            Decode.succeed Delete
+
+                        _ ->
+                            Decode.fail <| "unknown type: " ++ t
+                )
+                (Decode.field "type" Decode.string)
+            , Decode.succeed None
+            ]
+        )
 
 
 

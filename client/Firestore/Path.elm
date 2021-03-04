@@ -1,250 +1,232 @@
 module Firestore.Path exposing (..)
 
-import Array exposing (Array)
-import Dict exposing (Dict)
 import Dict.Extra as Dict
+import Json.Decode as Decode exposing (Decoder)
+import Json.Encode as Encode exposing (Value)
 import Maybe.Extra as Maybe
-import Util exposing (orWith)
 
 
 type alias Id =
     String
 
 
-type alias Path =
-    Array Id
+type Path
+    = Root
+    | RootCol Id Col
+
+
+type Col
+    = Col
+    | SubDoc Id Doc
+    | Query String String Value Col
+
+
+type Doc
+    = Doc
+    | SubCol Id Col
 
 
 root : Path
 root =
-    Array.empty
+    Root
 
 
 isRoot : Path -> Bool
 isRoot =
-    Array.isEmpty
+    (==) Root
 
 
 topLevel : Id -> Path
 topLevel id =
-    Array.fromList [ id ]
-
-
-fromIds : List Id -> Path
-fromIds =
-    Array.fromList
-
-
-toIds : Path -> List Id
-toIds =
-    Array.toList
-
-
-sub : Path -> Id -> Path
-sub path id =
-    Array.push id path
+    RootCol id Col
 
 
 getLast : Path -> Maybe Id
 getLast p =
-    if Array.isEmpty p then
-        Nothing
-
-    else
-        Array.get (Array.length p - 1) p
-
-
-type alias Paths =
-    PathMap ()
-
-
-type PathMap a
-    = PathMap (Maybe a) (Dict Id (PathMap a))
-
-
-empty : PathMap a
-empty =
-    PathMap Nothing Dict.empty
-
-
-getRootItem : PathMap a -> Maybe a
-getRootItem (PathMap ma _) =
-    ma
-
-
-rootItem : a -> PathMap a
-rootItem a =
-    PathMap (Just a) Dict.empty
-
-
-singleton : Path -> a -> PathMap a
-singleton path a =
-    Array.foldr
-        (\id m -> PathMap Nothing <| Dict.singleton id m)
-        (PathMap (Just a) Dict.empty)
-        path
-
-
-singleton_ : List Id -> a -> PathMap a
-singleton_ path a =
-    List.foldr
-        (\id m -> PathMap Nothing <| Dict.singleton id m)
-        (PathMap (Just a) Dict.empty)
-        path
-
-
-isEmpty : PathMap a -> Bool
-isEmpty (PathMap ma d) =
-    (ma == Nothing)
-        && (Dict.isEmpty d || not (Dict.any (\_ -> isEmpty >> not) d))
-
-
-at : Id -> PathMap a -> PathMap a
-at id (PathMap _ d) =
-    Dict.get id d |> Maybe.withDefault empty
-
-
-subMaps : PathMap a -> List ( Id, PathMap a )
-subMaps (PathMap _ d) =
-    Dict.toList d
-
-
-subMaps_ : PathMap a -> Dict Id (PathMap a)
-subMaps_ (PathMap _ d) =
-    d
-
-
-insert : Path -> a -> PathMap a -> PathMap a
-insert path a (PathMap ma d) =
     let
-        go id ids =
-            Dict.update id <|
-                \m ->
-                    case m of
-                        Nothing ->
-                            Just <| singleton_ ids a
+        goCol col =
+            case col of
+                Col ->
+                    Nothing
 
-                        Just (PathMap ma_ d_) ->
-                            case ids of
-                                [] ->
-                                    Just <| PathMap (Just a) d_
+                SubDoc id doc ->
+                    Maybe.or (goDoc doc) (Just id)
 
-                                id_ :: ids_ ->
-                                    Just <| PathMap ma_ <| go id_ ids_ d_
+                Query _ _ _ col_ ->
+                    goCol col_
+
+        goDoc doc =
+            case doc of
+                Doc ->
+                    Nothing
+
+                SubCol id col ->
+                    Maybe.or (goCol col) (Just id)
     in
-    case Array.toList path of
+    case p of
+        Root ->
+            Nothing
+
+        RootCol id col ->
+            Maybe.or (goCol col) (Just id)
+
+
+fromIds : List Id -> Path
+fromIds xs =
+    let
+        goCol ids =
+            case ids of
+                id :: ids_ ->
+                    SubDoc id <| goDoc ids_
+
+                [] ->
+                    Col
+
+        goDoc ids =
+            case ids of
+                id :: ids_ ->
+                    SubCol id <| goCol ids_
+
+                [] ->
+                    Doc
+    in
+    case xs of
         [] ->
-            PathMap (Just a) d
+            Root
 
         id :: ids ->
-            PathMap ma <| go id ids d
+            RootCol id <| goCol ids
 
 
-map : (a -> b) -> PathMap a -> PathMap b
-map f (PathMap m d) =
-    PathMap (Maybe.map f m) (Dict.map (\_ -> map f) d)
+fromString : String -> Path
+fromString str =
+    case String.split "/" str of
+        [ "" ] ->
+            Root
+
+        ids ->
+            fromIds ids
 
 
-subMap : Id -> PathMap a -> PathMap a
-subMap id m =
-    PathMap Nothing <| Dict.singleton id m
+encode : Path -> Value
+encode path =
+    case path of
+        Root ->
+            Encode.object <|
+                [ ( "type", Encode.string "root" ) ]
+
+        RootCol id col ->
+            Encode.object <|
+                [ ( "type", Encode.string "col" )
+                , ( "id", Encode.string id )
+                , ( "sub", encodeCol col )
+                ]
 
 
-toList : PathMap a -> List ( Path, a )
-toList =
-    toList_ >> List.map (\( p, a ) -> ( fromIds p, a ))
+encodeCol : Col -> Value
+encodeCol col =
+    case col of
+        Col ->
+            Encode.object <|
+                [ ( "type", Encode.string "end" ) ]
+
+        SubDoc id doc ->
+            Encode.object <|
+                [ ( "type", Encode.string "doc" )
+                , ( "id", Encode.string id )
+                , ( "sub", encodeDoc doc )
+                ]
+
+        Query field op value col_ ->
+            Encode.object <|
+                [ ( "type", Encode.string "query" )
+                , ( "field", Encode.string field )
+                , ( "op", Encode.string op )
+                , ( "value", value )
+                , ( "sub", encodeCol col_ )
+                ]
 
 
-toList_ : PathMap a -> List ( List Id, a )
-toList_ (PathMap m d) =
-    let
-        subs =
-            Dict.toList d
-                |> List.concatMap
-                    (\( id, pm ) ->
-                        toList_ pm
-                            |> List.map
-                                (\( ids, a ) -> ( id :: ids, a ))
-                    )
-    in
-    case m of
-        Nothing ->
-            subs
+encodeDoc : Doc -> Value
+encodeDoc doc =
+    case doc of
+        Doc ->
+            Encode.object <|
+                [ ( "type", Encode.string "end" ) ]
 
-        Just a ->
-            ( [], a ) :: subs
+        SubCol id col ->
+            Encode.object <|
+                [ ( "type", Encode.string "col" )
+                , ( "id", Encode.string id )
+                , ( "sub", encodeCol col )
+                ]
 
 
-merge : (a -> a -> a) -> PathMap a -> PathMap a -> PathMap a
-merge f (PathMap ma da) (PathMap mb db) =
-    PathMap
-        (orWith f ma mb)
-    <|
-        Dict.merge Dict.insert
-            (\id pl pr ->
-                Dict.insert id <| merge f pl pr
+decode : Decoder Path
+decode =
+    Decode.field "type" Decode.string
+        |> Decode.andThen
+            (\type_ ->
+                case type_ of
+                    "root" ->
+                        Decode.succeed Root
+
+                    "col" ->
+                        Decode.map2 RootCol
+                            (Decode.field "id" Decode.string)
+                            (Decode.field "sub" decodeCol)
+
+                    _ ->
+                        Decode.fail "root path"
             )
-            Dict.insert
-            da
-            db
-            Dict.empty
 
 
-diff :
-    PathMap a
-    -> PathMap a
-    -> ( PathMap a, PathMap a )
-diff (PathMap ma da) (PathMap mb db) =
-    let
-        ( dl_, dr_ ) =
-            Dict.merge
-                (\id p ( dl, dr ) -> ( Dict.insert id p dl, dr ))
-                (\id pl pr ( dl, dr ) ->
-                    let
-                        ( sdl, sdr ) =
-                            diff pl pr
-                    in
-                    ( if isEmpty sdl then
-                        dl
+decodeCol : Decoder Col
+decodeCol =
+    Decode.field "type" Decode.string
+        |> Decode.andThen
+            (\type_ ->
+                case type_ of
+                    "end" ->
+                        Decode.succeed Col
 
-                      else
-                        Dict.insert id sdl dl
-                    , if isEmpty sdr then
-                        dr
+                    "doc" ->
+                        Decode.map2 SubDoc
+                            (Decode.field "id" Decode.string)
+                            (Decode.field "sub" decodeDoc)
 
-                      else
-                        Dict.insert id sdr dr
-                    )
-                )
-                (\id sm ( dl, dr ) -> ( dl, Dict.insert id sm dr ))
-                da
-                db
-                ( Dict.empty, Dict.empty )
-    in
-    if ma == mb then
-        ( PathMap Nothing dl_, PathMap Nothing dr_ )
+                    "query" ->
+                        Decode.map4 Query
+                            (Decode.field "field" Decode.string)
+                            (Decode.field "op" Decode.string)
+                            (Decode.field "value" Decode.value)
+                            (Decode.field "sub" <|
+                                Decode.lazy <|
+                                    \_ -> decodeCol
+                            )
 
-    else
-        ( PathMap ma dl_, PathMap mb dr_ )
+                    _ ->
+                        Decode.fail "collection path"
+            )
 
 
-joinMap : PathMap a -> (a -> PathMap b) -> PathMap b
-joinMap (PathMap ma d) f =
-    merge always
-        (Maybe.unwrap empty f ma)
-        (PathMap Nothing <| Dict.map (\_ p -> joinMap p f) d)
+decodeDoc : Decoder Doc
+decodeDoc =
+    Decode.field "type" Decode.string
+        |> Decode.andThen
+            (\type_ ->
+                case type_ of
+                    "end" ->
+                        Decode.succeed Doc
 
+                    "col" ->
+                        Decode.map2 SubCol
+                            (Decode.field "id" Decode.string)
+                            (Decode.field "sub" <|
+                                Decode.lazy <|
+                                    \_ -> decodeCol
+                            )
 
-append : Paths -> Paths -> Paths
-append =
-    merge always
-
-
-joinSub : Paths -> Paths -> Paths
-joinSub p s =
-    joinMap p <| always s
-
-
-push : Path -> Paths -> Paths
-push path =
-    insert path ()
+                    _ ->
+                        Decode.fail "document path"
+            )

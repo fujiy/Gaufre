@@ -5,9 +5,11 @@
   "main": "index.js",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
-    "emulate": "firebase emulators:start --only firestore,hosting",
     "watch": "elm-live client/Main.elm  -- --output=public/main.js --debug",
-    "build": "elm make ./client/Main.elm --output=public/main.js"
+    "build": "elm make ./client/Main.elm --output=public/main.js",
+    "save": "firebase emulators:export --force ./firebase-data/",
+    "emulate": "firebase emulators:start --only firestore,hosting",
+    "continue": "firebase emulators:start --import=./firebase-data --only firestore,hosting"
   },
   "repository": {
     "type": "git",

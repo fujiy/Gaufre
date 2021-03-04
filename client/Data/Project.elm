@@ -16,6 +16,8 @@ type alias Project =
     { id : String
     , name : String
     , members : List User.Reference
+    , admins : List User.Reference
+    , owner : User.Reference
     , processes : Dict ProcessId Process
     , parts : Dict ProcessId Part
     }
@@ -47,9 +49,9 @@ desc =
     Desc.documentWithIdAndSubs
         Project
         (Desc.field "name" .name Desc.string
-            >> Desc.field "members"
-                .members
-                (Desc.list Desc.reference)
+            >> Desc.field "members" .members (Desc.list Desc.reference)
+            >> Desc.field "admins" .admins (Desc.list Desc.reference)
+            >> Desc.field "owner" .owner Desc.reference
             >> Desc.field "proesses" .processes (Desc.dict processDesc)
             >> Desc.field "parts" .parts (Desc.dict partDesc)
         )
@@ -61,12 +63,12 @@ desc =
 -- Lenses
 
 
-works : Lens Document Work.Collection
+works : Lens Doc Document Col Work.Collection
 works =
     Lens.subCollection .works (\b a -> { a | works = b })
 
 
-work : Id -> Lens Document Work.Document
+work : Id -> Lens Doc Document Doc Work.Document
 work id =
     o works <| Lens.doc id
 
@@ -80,6 +82,8 @@ init file user =
     { id = file.id
     , name = file.name
     , members = [ user ]
+    , admins = [ user ]
+    , owner = user
     , processes = Dict.empty
     , parts = Dict.empty
     }

@@ -1,12 +1,16 @@
 module Firestore exposing
     ( CmdPort
+    , Col
     , Collection
+    , Doc
     , Document
     , Firestore
     , FirestoreSub
     , Id
+    , Item
     , Lens
     , Reference
+    , Root
     , SubPort
     , apply
     , getId
@@ -19,8 +23,11 @@ module Firestore exposing
 
 import Firestore.Desc as Desc exposing (Desc, FirestoreDesc(..))
 import Firestore.Internal as Internal exposing (..)
-import Firestore.Path as Path exposing (Path, PathMap, Paths)
+import Firestore.Path as Path exposing (Path)
+import Firestore.Path.Map as PathMap exposing (Paths)
+import Firestore.Path.Map.Slice as Slice
 import Firestore.Remote as Remote exposing (Remote(..))
+import Firestore.Update as Update exposing (Updater)
 import Json.Decode as Decode
 import Json.Encode as Encode exposing (Value)
 
@@ -61,8 +68,28 @@ type alias Reference s r =
     Internal.Reference s r
 
 
-type alias Lens a b =
-    Internal.Lens a b
+type alias Lens p a q b =
+    Internal.Lens p a q b
+
+
+type alias Root =
+    Internal.Root
+
+
+type alias Col =
+    Internal.Col
+
+
+type alias Doc =
+    Internal.Doc
+
+
+type alias Item =
+    Internal.Item
+
+
+type alias Accessor r a =
+    Internal.Accessor Root Item r a
 
 
 type alias SubPort msg =
@@ -88,8 +115,8 @@ init (FirestoreDesc d) =
     Firestore
         { desc = FirestoreDesc d
         , data = d.empty
-        , afterwards = noUpdater
-        , listenings = Path.empty
+        , afterwards = Update.none
+        , listenings = PathMap.empty
         , errors = []
         }
 
@@ -105,7 +132,7 @@ watch p (Firestore fs) =
                             ( sub.updates, fs.errors )
 
                         Err err ->
-                            ( Path.empty, err :: fs.errors )
+                            ( PathMap.empty, err :: fs.errors )
 
                 (FirestoreDesc { applier }) =
                     fs.desc
@@ -133,19 +160,28 @@ update :
     -> (r -> Accessor r a)
     -> Firestore r
     -> ( Firestore r, Maybe a, Cmd msg )
-update p (Updater updater) use (Firestore fs) =
+update p updater use (Firestore fs) =
     let
         upds =
-            updater fs.data
+            Update.runUpdater updater fs.data
 
-        (Accessor requests ra) =
+        (Accessor reqs ra) =
             use upds.value
 
+        requests =
+            Slice.toMap mergeRequest Get reqs
+                |> PathMap.merge mergeRequest upds.requests
+
+        updates =
+            PathMap.filterMap isUpdateRequest requests
+                |> PathMap.clean
+
         listenings =
-            Path.append requests upds.requests
+            PathMap.filterMap isGetRequest requests
+                |> PathMap.clean
 
         ( listens, unlistens ) =
-            Path.diff listenings fs.listenings
+            PathMap.diff listenings fs.listenings
     in
     ( Firestore
         { fs
@@ -154,7 +190,7 @@ update p (Updater updater) use (Firestore fs) =
             , afterwards = upds.afterwards
         }
     , Remote.toMaybe ra
-    , p <| encodeCommand <| Command listens unlistens upds.updates
+    , p <| encodeCommand <| Command listens unlistens updates
     )
 
 
@@ -164,18 +200,41 @@ render :
     -> Firestore r
     -> ( Firestore r, Maybe a, Cmd msg )
 render p use =
-    update p noUpdater use
+    update p Update.none use
+
+
+isGetRequest : Request -> Maybe ()
+isGetRequest req =
+    case req of
+        None ->
+            Nothing
+
+        _ ->
+            Just ()
+
+
+isUpdateRequest : Request -> Maybe Request
+isUpdateRequest req =
+    case req of
+        None ->
+            Nothing
+
+        Get ->
+            Nothing
+
+        _ ->
+            Just req
 
 
 type alias Command =
     { listen : Paths
     , unlisten : Paths
-    , updates : PathMap Update
+    , updates : PathMap.Map Request
     }
 
 
 type alias Subscription =
-    { updates : PathMap Value }
+    { updates : PathMap.Map Value }
 
 
 encodeCommand : Command -> Value
@@ -183,7 +242,7 @@ encodeCommand command =
     Encode.object
         [ ( "listen", Desc.paths.encoder command.listen )
         , ( "unlisten", Desc.paths.encoder command.unlisten )
-        , ( "updates", (Desc.pathMap updateDesc).encoder command.updates )
+        , ( "updates", (Desc.pathMap Desc.request).encoder command.updates )
         ]
 
 
@@ -192,40 +251,3 @@ decodeSubscription =
     Decode.map Subscription <|
         Decode.field "updates" <|
             (Desc.pathMap Desc.value).decoder
-
-
-updateDesc : Desc Update
-updateDesc =
-    Desc
-        (\u ->
-            case u of
-                Set v ->
-                    Encode.object
-                        [ ( "type", Encode.string "set" ), ( "value", v ) ]
-
-                Add v ->
-                    Encode.object
-                        [ ( "type", Encode.string "add" ), ( "value", v ) ]
-
-                Delete ->
-                    Encode.object [ ( "type", Encode.string "delete" ) ]
-        )
-        (Decode.andThen
-            (\t ->
-                case t of
-                    "set" ->
-                        Decode.map Set <|
-                            Decode.field "value" Decode.value
-
-                    "add" ->
-                        Decode.map Add <|
-                            Decode.field "value" Decode.value
-
-                    "delete" ->
-                        Decode.succeed Delete
-
-                    _ ->
-                        Decode.fail <| "unknown type: " ++ t
-            )
-            (Decode.field "type" Decode.string)
-        )

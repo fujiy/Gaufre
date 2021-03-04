@@ -9,7 +9,7 @@ import Firestore exposing (..)
 import Firestore.Desc as Desc exposing (FirestoreDesc)
 import Firestore.Lens as Lens exposing (o)
 import Firestore.Path exposing (Id)
-import Firestore.Update as Update
+import Firestore.Update as Update exposing (Updater)
 import Maybe.Extra as Maybe
 
 
@@ -32,17 +32,17 @@ type alias Data =
 -- Collection
 
 
-clients : Lens Data Client.Collection
+clients : Lens Root Data Col Client.Collection
 clients =
     Lens.collection .clients (\b a -> { a | clients = b })
 
 
-users : Lens Data User.Collection
+users : Lens Root Data Col User.Collection
 users =
     Lens.collection .users (\b a -> { a | users = b })
 
 
-projects : Lens Data Project.Collection
+projects : Lens Root Data Col Project.Collection
 projects =
     Lens.collection .projects (\b a -> { a | projects = b })
 
@@ -51,12 +51,12 @@ projects =
 -- User
 
 
-myClient : Auth -> Lens Data Client.Document
+myClient : Auth -> Lens Root Data Doc Client.Document
 myClient auth =
     o clients <| Lens.doc auth.uid
 
 
-me : Auth -> Lens Data User.Document
+me : Auth -> Lens Root Data Doc User.Document
 me auth =
     o users <| Lens.doc auth.uid
 
@@ -65,36 +65,39 @@ me auth =
 -- Project
 
 
-myProjects : Auth -> Lens Data (List Project.Document)
+myProjects : Auth -> Lens Root Data Doc (List Project.Document)
 myProjects auth =
-    Lens.derefs projectDeref <|
+    Lens.derefs projects Lens.end <|
         o (myClient auth) <|
             o Lens.get <|
-                Lens.composeIso Client.projects (Lens.reverse Lens.list2array)
+                o Client.projects <|
+                    Lens.fromIso (Lens.reverse Lens.list2array)
 
 
-currentProject : Auth -> Int -> Lens Data Project.Document
+currentProject : Auth -> Int -> Lens Root Data Doc Project.Document
 currentProject auth i =
-    Lens.deref projectDeref <|
+    projectDeref <|
         o (myClient auth) <|
             o Lens.get <|
                 o Client.projects <|
                     Lens.atArray i
 
 
-project : Id -> Lens Data Project.Document
+project : Id -> Lens Root Data Doc Project.Document
 project id =
     o projects <| Lens.doc id
 
 
-projectDeref : Lens.Dereferer Data Project.Document
+projectDeref :
+    Lens Root Data Item Project.Reference
+    -> Lens Root Data Doc Project.Document
 projectDeref =
-    Lens.dereferer projects
+    Lens.deref projects Lens.end
 
 
-projectMembers : Project -> Lens Data (List User.Document)
+projectMembers : Project -> Lens Root Data Doc (List User.Document)
 projectMembers p =
-    Lens.derefs (Lens.dereferer users) <|
+    Lens.derefs users Lens.end <|
         Lens.const p.members
 
 
@@ -113,7 +116,7 @@ desc =
         |> Desc.firestore Data
 
 
-initClient : Auth -> User -> Update.Updater Data
+initClient : Auth -> User -> Updater Data
 initClient auth user =
     Update.all
         [ Update.default (me auth) User.desc user

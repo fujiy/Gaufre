@@ -1,96 +1,131 @@
 module Firestore.Lens exposing (..)
 
-import Array exposing (Array)
-import Browser.Navigation exposing (load)
+-- import Firestore.Desc exposing (Desc, paths)
+
+import Array exposing (Array, slice)
 import Dict
 import Firestore.Access as Access
-import Firestore.Desc exposing (documentWithSubs, paths)
 import Firestore.Internal exposing (..)
 import Firestore.Path as Path exposing (Id, Path)
+import Firestore.Path.Map as PathMap
+import Firestore.Path.Map.Slice as Slice
 import Firestore.Remote as Remote exposing (Remote(..))
-import Firestore.Update as Update
-import Html exposing (col)
 import List.Extra as List
 import Maybe.Extra as Maybe
 import Monocle.Iso as Iso exposing (Iso)
 
 
-lens : (a -> b) -> (b -> a -> a) -> Lens a b
+lens : (a -> b) -> (b -> a -> a) -> Lens x a x b
 lens getter setter =
     Lens
-        (getter >> UpToDate >> Accessor (Path.rootItem ()))
-        (\u b ->
-            Updater <|
-                \a ->
-                    { value = setter b a
-                    , updates = Path.rootItem u
-                    , requests = Path.empty
-                    , afterwards = noUpdater
-                    }
-        )
+        { access = getter >> Access.just
+        , update =
+            \_ b ->
+                Updater <|
+                    \a ->
+                        { value = setter b a
+                        , requests = Slice.zero
+                        , afterwards = noUpdater
+                        }
+        }
 
 
-o : Lens a b -> Lens b c -> Lens a c
-o (Lens af uf) (Lens ag ug) =
+option : (a -> Maybe b) -> (b -> a -> a) -> Lens x a x b
+option getter setter =
     Lens
-        (\a ->
-            let
-                (Accessor pas rb) =
-                    af a
-
-                (Accessor pbs rc) =
-                    Access.unremote <| Remote.map ag rb
-            in
-            Accessor (Path.joinSub pas pbs) rc
-        )
-        (\u c ->
-            let
-                updater _ =
-                    Updater <|
-                        \a ->
-                            let
-                                (Accessor paths rb) =
-                                    af a
-                            in
-                            case Remote.toMaybe rb of
-                                Nothing ->
-                                    { value = a
-                                    , updates = Path.empty
-                                    , requests = paths
-                                    , afterwards =
-                                        case rb of
-                                            Loading ->
-                                                updater ()
-
-                                            _ ->
-                                                noUpdater
-                                    }
-
-                                Just b ->
-                                    let
-                                        ubs =
-                                            runUpdater (ug u c) b
-
-                                        uas =
-                                            runUpdater (uf u ubs.value) a
-                                    in
-                                    { value = uas.value
-                                    , updates =
-                                        Path.joinMap uas.updates <|
-                                            \_ -> ubs.updates
-                                    , requests = Path.empty
-                                    , afterwards = noUpdater
-                                    }
-            in
-            updater ()
-        )
+        { access = getter >> Remote.fromMaybe >> Accessor Slice.zero
+        , update =
+            \_ b ->
+                Updater <|
+                    \a ->
+                        { value = setter b a
+                        , requests = Slice.zero
+                        , afterwards = noUpdater
+                        }
+        }
 
 
-const : a -> Lens x a
+ident : Lens x a x a
+ident =
+    Lens
+        { access = \a -> Access.just a
+        , update =
+            \_ a ->
+                Updater <|
+                    \_ ->
+                        { value = a
+                        , requests = Slice.zero
+                        , afterwards = noUpdater
+                        }
+        }
+
+
+o : Lens o a p b -> Lens p b q c -> Lens o a q c
+o (Lens ll) (Lens lr) =
+    Lens
+        { access =
+            \a ->
+                let
+                    (Accessor sop rb) =
+                        ll.access a
+
+                    (Accessor spq rc) =
+                        Access.unremote <| Remote.map lr.access rb
+                in
+                Accessor (Slice.compose sop spq) rc
+        , update =
+            \u c ->
+                let
+                    updater _ =
+                        Updater <|
+                            \a ->
+                                let
+                                    (Accessor sop rb) =
+                                        ll.access a
+                                in
+                                case Remote.toMaybe rb of
+                                    Nothing ->
+                                        { value = a
+                                        , requests = Slice.nothing
+                                        , afterwards =
+                                            case rb of
+                                                Loading ->
+                                                    updater ()
+
+                                                _ ->
+                                                    noUpdater
+                                        }
+
+                                    Just b ->
+                                        let
+                                            ubs =
+                                                runUpdater
+                                                    (lr.update u c)
+                                                    b
+
+                                            uas =
+                                                runUpdater
+                                                    (ll.update None ubs.value)
+                                                    a
+                                        in
+                                        { value = uas.value
+                                        , requests =
+                                            Slice.compose
+                                                (Slice.both sop uas.requests)
+                                                ubs.requests
+                                        , afterwards = noUpdater
+                                        }
+                in
+                updater ()
+        }
+
+
+const : a -> Lens p b q a
 const a =
     Lens
-        (\_ -> Access.success a)
-        (\_ _ -> noUpdater)
+        { access = \_ -> Accessor Slice.nothing <| UpToDate a
+        , update = \_ _ -> noUpdater
+        }
 
 
 
@@ -99,67 +134,39 @@ const a =
 -- Iso
 
 
-fromIso : Iso a b -> Lens a b
-fromIso iso =
-    lens iso.get (\b _ -> iso.reverseGet b)
+fromIso : Iso a b -> Lens x a x b
+fromIso i =
+    lens i.get (\b _ -> i.reverseGet b)
 
 
-isoCompose : Iso a b -> Lens b c -> Lens a c
-isoCompose iso (Lens af uf_) =
-    Lens (iso.get >> af >> coerce)
-        (\u c ->
-            let
-                cupd uf =
-                    Updater <|
-                        \a ->
-                            let
-                                upd =
-                                    runUpdater (uf u c) <| iso.get a
-                            in
-                            { value = iso.reverseGet upd.value
-                            , updates = upd.updates
-                            , requests = upd.requests
-                            , afterwards = cupd <| \_ _ -> upd.afterwards
-                            }
-            in
-            cupd uf_
-        )
-
-
-composeIso : Lens a b -> Iso b c -> Lens a c
-composeIso (Lens af uf) iso =
-    Lens (af >> Access.map iso.get)
-        (\u c -> uf u <| iso.reverseGet c)
+iso : (a -> b) -> (b -> a) -> Lens x a x b
+iso getter rev =
+    lens getter (\b _ -> rev b)
 
 
 
--- Basic data types
+-- -- Basic data types
 
 
-list : Lens a b -> Lens (List a) (List b)
-list (Lens af uf) =
+list : Lens p a q b -> Lens p (List a) q (List b)
+list (Lens l) =
     Lens
-        (List.map af >> Access.list >> coerce)
-        (\u -> Update.list (uf u))
+        { access = List.map l.access >> Access.list >> coerce
+        , update = \u -> listUpdater (l.update u)
+        }
 
 
-array : Lens a b -> Lens (Array a) (Array b)
-array l =
-    isoCompose (reverse list2array) <| composeIso (list l) list2array
+array : Lens p a q b -> Lens p (Array a) q (Array b)
+array (Lens l) =
+    Lens
+        { access = Array.map l.access >> Access.array >> coerce
+        , update = \u -> arrayUpdater (l.update u)
+        }
 
 
-atArray : Int -> Lens (Array a) a
+atArray : Int -> Lens x (Array a) x a
 atArray i =
-    Lens (Array.get i >> Remote.fromMaybe >> Accessor Path.empty)
-        (\u a ->
-            Updater <|
-                \xs ->
-                    { value = Array.set i a xs
-                    , updates = Path.rootItem u
-                    , requests = Path.empty
-                    , afterwards = noUpdater
-                    }
-        )
+    option (Array.get i) (Array.set i)
 
 
 
@@ -169,324 +176,380 @@ atArray i =
 collection :
     (r -> Collection ss sr)
     -> (Collection ss sr -> r -> r)
-    -> Lens r (Collection ss sr)
+    -> Lens Root r Col (Collection ss sr)
 collection getter setter =
     Lens
-        (\r ->
-            let
-                (Collection col) =
-                    getter r
-            in
-            Accessor
-                (Path.singleton (Path.topLevel col.name) ())
-                (UpToDate <| Collection col)
-        )
-        (\u (Collection col) ->
-            Updater <|
-                \r ->
-                    { value = setter (Collection col) r
-                    , updates = Path.singleton (Path.topLevel col.name) u
-                    , requests = Path.empty
-                    , afterwards = noUpdater
-                    }
-        )
+        { access =
+            \r ->
+                let
+                    (Collection col) =
+                        getter r
+                in
+                Accessor (Slice.col col.name) (UpToDate <| Collection col)
+        , update =
+            \u (Collection col) ->
+                Updater <|
+                    \r ->
+                        { value = setter (Collection col) r
+                        , requests =
+                            Slice.addCol (Slice.col col.name)
+                                (PathMap.colRootItem u)
+                        , afterwards = noUpdater
+                        }
+        }
 
 
 subCollection :
     (s -> Collection ss sr)
     -> (Collection ss sr -> s -> s)
-    -> Lens (Document s r) (Collection ss sr)
+    -> Lens Doc (Document s r) Col (Collection ss sr)
 subCollection getter setter =
     Lens
-        (\(Document s _) ->
-            let
-                (Collection col) =
-                    getter s
-            in
-            Accessor
-                (Path.singleton (Path.topLevel col.name) ())
-                (UpToDate <| Collection col)
-        )
-        (\u (Collection col) ->
-            Updater <|
-                \(Document s r) ->
-                    { value = Document (setter (Collection col) s) r
-                    , updates = Path.singleton (Path.topLevel col.name) u
-                    , requests = Path.empty
-                    , afterwards = noUpdater
-                    }
-        )
+        { access =
+            \(Document s _) ->
+                let
+                    (Collection col) =
+                        getter s
+                in
+                Accessor (Slice.subCol col.name) (UpToDate <| Collection col)
+        , update =
+            \u (Collection col) ->
+                Updater <|
+                    \(Document s r) ->
+                        { value = Document (setter (Collection col) s) r
+                        , requests =
+                            Slice.addSubCol (Slice.subCol col.name)
+                                (PathMap.colRootItem u)
+                        , afterwards = noUpdater
+                        }
+        }
 
 
-doc : Id -> Lens (Collection s r) (Document s r)
+doc : Id -> Lens Col (Collection s r) Doc (Document s r)
 doc id =
     Lens
-        (\(Collection col) ->
-            Accessor
-                (Path.singleton (Path.topLevel id) ())
-                (Dict.get id col.docs
-                    |> Maybe.withDefault (Document col.empty Loading)
-                    |> UpToDate
-                )
-        )
-        (\u d ->
-            Updater <|
-                \(Collection col) ->
-                    { value =
-                        Collection
-                            { col | docs = Dict.insert id d col.docs }
-                    , updates = Path.singleton (Path.topLevel id) u
-                    , requests = Path.empty
-                    , afterwards = noUpdater
-                    }
-        )
+        { access =
+            \(Collection col) ->
+                Accessor
+                    (Slice.doc id)
+                    (Dict.get id col.docs
+                        |> Maybe.withDefault (Document col.empty Loading)
+                        |> UpToDate
+                    )
+        , update =
+            \u d ->
+                Updater <|
+                    \(Collection col) ->
+                        { value =
+                            Collection
+                                { col | docs = Dict.insert id d col.docs }
+                        , requests =
+                            Slice.addDoc (Slice.doc id) (PathMap.docRootItem u)
+                        , afterwards = noUpdater
+                        }
+        }
 
 
-getAllRemote : Lens (Collection s r) (List ( Id, Remote r ))
+
+-- equal : String -> Desc a -> a -> Query
+-- equal field desc a =
+--     Query field "==" <| desc.encoder a
+-- where_ : Query -> Lens (Collection s r) (Collection s r)
+-- where_ q =
+--     Debug.todo ""
+
+
+getAllRemote : Lens Col (Collection s r) Item (List ( Id, Remote r ))
 getAllRemote =
     Lens
-        (\(Collection col) ->
-            Accessor
-                (Path.rootItem ())
-                (Dict.toList col.docs
-                    |> List.map (\( id, Document _ r ) -> ( id, r ))
-                    |> UpToDate
-                )
-        )
-        (\u xs ->
-            Updater <|
-                \(Collection col) ->
-                    { value =
-                        Collection
-                            { col
-                                | docs =
-                                    List.foldr
-                                        (\( id, r ) ->
-                                            Dict.insert id <|
-                                                Document col.empty r
-                                        )
-                                        col.docs
-                                        xs
-                            }
-                    , updates = Path.rootItem u
-                    , requests = Path.empty
-                    , afterwards = noUpdater
-                    }
-        )
+        { access =
+            \(Collection col) ->
+                Accessor Slice.colItem
+                    (Dict.toList col.docs
+                        |> List.map (\( id, Document _ r ) -> ( id, r ))
+                        |> UpToDate
+                    )
+        , update =
+            \_ xs ->
+                Updater <|
+                    \(Collection col) ->
+                        { value =
+                            Collection
+                                { col
+                                    | docs =
+                                        List.foldr
+                                            (\( id, r ) ->
+                                                Dict.insert id <|
+                                                    Document col.empty r
+                                            )
+                                            col.docs
+                                            xs
+                                }
+                        , requests = Slice.colItem
+                        , afterwards = noUpdater
+                        }
+        }
 
 
-getAll : Lens (Collection s r) (List r)
+getAll : Lens Col (Collection s r) Item (List r)
 getAll =
     Lens
-        (\(Collection col) ->
-            Accessor
-                (Path.rootItem ())
-                (Dict.values col.docs
-                    |> List.filterMap (\(Document _ r) -> Remote.toMaybe r)
-                    |> UpToDate
-                )
-        )
-        (\u rs ->
-            Updater <|
-                \(Collection col) ->
-                    { value = Collection col
-                    , updates = Path.rootItem u
-                    , requests = Path.empty
-                    , afterwards = noUpdater
-                    }
-        )
+        { access =
+            \(Collection col) ->
+                Accessor Slice.colItem
+                    (Dict.values col.docs
+                        |> List.filterMap (\(Document _ r) -> Remote.toMaybe r)
+                        |> UpToDate
+                    )
+        , update = \_ _ -> noUpdater
+        }
 
 
-get : Lens (Document s r) r
+get : Lens Doc (Document s r) Item r
 get =
-    Lens (\(Document _ r) -> Accessor (Path.rootItem ()) r)
-        (\u r ->
-            Updater <|
-                \(Document s _) ->
-                    { value = Document s (UpToDate r)
-                    , updates = Path.rootItem u
-                    , requests = Path.empty
-                    , afterwards = noUpdater
-                    }
-        )
+    Lens
+        { access = \(Document _ r) -> Accessor Slice.docItem r
+        , update =
+            \_ r ->
+                Updater <|
+                    \(Document s _) ->
+                        { value = Document s <| UpToDate r
+                        , requests = Slice.docItem
+                        , afterwards = noUpdater
+                        }
+        }
 
 
-gets : Lens (List (Document s r)) (List r)
+gets : Lens Doc (List (Document s r)) Item (List r)
 gets =
     list get
 
 
-getRemote : Lens (Document s r) (Remote r)
+getRemote : Lens Doc (Document s r) Item (Remote r)
 getRemote =
-    Lens (\(Document _ r) -> Accessor (Path.rootItem ()) (UpToDate r))
-        (\u rr ->
-            Updater <|
-                \(Document s _) ->
-                    { value = Document s rr
-                    , updates = Path.rootItem u
-                    , requests = Path.empty
-                    , afterwards = noUpdater
-                    }
-        )
+    Lens
+        { access = \(Document _ r) -> Accessor Slice.docItem (UpToDate r)
+        , update =
+            \_ rr ->
+                Updater <|
+                    \(Document s _) ->
+                        { value = Document s rr
+                        , requests = Slice.docItem
+                        , afterwards = noUpdater
+                        }
+        }
 
 
 
 -- Reference
 
 
-ref : Lens a (Document s r) -> a -> Reference s r
-ref (Lens acc _) a =
+ref : Lens Root a Doc (Document s r) -> a -> Reference s r
+ref (Lens l) a =
     let
-        (Accessor paths _) =
-            acc a
+        (Accessor s _) =
+            l.access a
     in
-    Path.toList paths
+    Slice.toMapDoc mergeRequest Get s
+        |> PathMap.toList
         |> List.head
         |> Maybe.unwrap Path.root Tuple.first
         |> Reference
 
 
 type Dereferer d a
-    = Dereferer (List Id -> ( List Id, Lens d a ))
+    = Dereferer (Path.Doc -> Lens Doc d Doc a)
 
 
-sub : Lens a (Collection s r) -> Dereferer d a -> Dereferer d (Document s r)
-sub sl (Dereferer f) =
+type RootDereferer d a
+    = RootDereferer (Path -> Lens Root d Doc a)
+
+
+sub :
+    Lens Doc d Col (Collection rs rr)
+    -> Dereferer (Document rs rr) (Document s r)
+    -> Dereferer d (Document s r)
+sub superLens (Dereferer f) =
     Dereferer <|
-        \ids ->
-            case f ids of
-                ( _ :: id :: ids_, s ) ->
-                    ( ids_, o s <| o sl <| doc id )
+        \docPath ->
+            case docPath of
+                Path.SubCol _ (Path.SubDoc id subPath) ->
+                    o superLens <| o (doc id) <| f subPath
 
-                ( ids_, s ) ->
-                    ( ids_, o s <| fail <| Path.fromIds ids_ )
+                _ ->
+                    failDoc docPath
 
 
-dereferer : Lens d (Collection s r) -> Dereferer d (Document s r)
-dereferer l =
+root :
+    Lens Root d Col (Collection rs rr)
+    -> Dereferer (Document rs rr) (Document s r)
+    -> RootDereferer d (Document s r)
+root superLens (Dereferer f) =
+    RootDereferer <|
+        \path ->
+            case path of
+                Path.RootCol _ (Path.SubDoc id subPath) ->
+                    o superLens <| o (doc id) <| f subPath
+
+                _ ->
+                    fail
+
+
+end : Dereferer a a
+end =
     Dereferer <|
-        \ids ->
-            case ids of
-                _ :: id :: ids_ ->
-                    ( ids_, o l <| doc id )
+        \docPath ->
+            case docPath of
+                Path.Doc ->
+                    Lens
+                        { access = \a -> Access.just a
+                        , update =
+                            \u a ->
+                                Updater <|
+                                    \_ ->
+                                        { value = a
+                                        , requests =
+                                            Slice.addDoc Slice.zero
+                                                (PathMap.docRootItem u)
+                                        , afterwards = noUpdater
+                                        }
+                        }
 
-                ids_ ->
-                    ( ids_, fail <| Path.fromIds ids )
+                _ ->
+                    fail
+
+
+failDoc : Path.Doc -> Lens Doc a Doc b
+failDoc path =
+    Lens
+        { access = \_ -> Accessor (Slice.singletonDocDoc path) Failure
+        , update = \_ _ -> noUpdater
+        }
+
+
+fail : Lens p a q b
+fail =
+    Lens
+        { access = \_ -> Access.failure
+        , update = \_ _ -> noUpdater
+        }
 
 
 derefs :
-    Dereferer d (Document s r)
-    -> Lens d (List (Reference s r))
-    -> Lens d (List (Document s r))
-derefs drf (Lens acc _) =
+    Lens Root d Col (Collection rs rr)
+    -> Dereferer (Document rs rr) (Document s r)
+    -> Lens Root d Item (List (Reference s r))
+    -> Lens Root d Doc (List (Document s r))
+derefs rl drf (Lens l) =
+    let
+        rdrf =
+            root rl drf
+    in
     Lens
-        (\d ->
-            let
-                (Accessor paths rrs) =
-                    acc d
-            in
-            Remote.traverse List.map (always []) rrs
-                |> List.map
-                    (\rr -> derefAccessor drf (Accessor paths rr) d)
-                |> Access.list
-        )
-        (\u docs ->
-            List.indexedMap Tuple.pair docs
-                |> List.map
-                    (\( i, dc ) ->
-                        derefUpdater drf
-                            (acc
-                                >> Access.map (List.getAt i)
-                                >> Access.fromJust
-                            )
-                            u
-                            dc
-                    )
-                |> Update.all
-        )
+        { access =
+            \d ->
+                let
+                    (Accessor rs rrs) =
+                        l.access d
+                in
+                Remote.traverse List.map (always []) rrs
+                    |> List.map
+                        (\rr -> derefAccessor rdrf (Accessor rs rr) d)
+                    |> Access.list
+        , update =
+            \u docs ->
+                List.indexedMap Tuple.pair docs
+                    |> List.map
+                        (\( i, dc ) ->
+                            derefUpdater rdrf
+                                (l.access
+                                    >> Access.map (List.getAt i)
+                                    >> Access.fromJust
+                                )
+                                u
+                                dc
+                        )
+                    |> allUpdater
+        }
+
+
+deref :
+    Lens Root d Col (Collection rs rr)
+    -> Dereferer (Document rs rr) (Document s r)
+    -> Lens Root d Item (Reference s r)
+    -> Lens Root d Doc (Document s r)
+deref rl drf (Lens l) =
+    let
+        rdrf =
+            root rl drf
+    in
+    Lens
+        { access = \d -> derefAccessor rdrf (l.access d) d
+        , update = derefUpdater rdrf l.access
+        }
 
 
 derefAccessor :
-    Dereferer d (Document s r)
-    -> Accessor d (Reference s r)
+    RootDereferer d (Document s r)
+    -> Accessor Root Item d (Reference s r)
     -> d
-    -> Accessor d (Document s r)
-derefAccessor (Dereferer f) (Accessor paths rr) d =
+    -> Accessor Root Doc d (Document s r)
+derefAccessor (RootDereferer f) (Accessor rs rr) d =
     let
-        (Accessor dpaths rdoc) =
+        (Accessor ds rdoc) =
             Remote.map
                 (\(Reference path) ->
-                    case f <| Path.toIds path of
-                        ( [], Lens acc_ _ ) ->
-                            acc_ d
-
-                        _ ->
-                            Access.failure
+                    let
+                        (Lens l) =
+                            f path
+                    in
+                    l.access d
                 )
                 rr
                 |> Access.unremote
     in
-    Accessor (Path.append paths dpaths) rdoc
+    Accessor (Slice.also rs Get ds) rdoc
 
 
 derefUpdater :
-    Dereferer d (Document s r)
-    -> (d -> Accessor d (Reference s r))
-    -> Update
+    RootDereferer d (Document s r)
+    -> (d -> Accessor Root Item d (Reference s r))
+    -> Request
     -> Document s r
-    -> Updater d
-derefUpdater (Dereferer f) acc u dc =
+    -> Updater Root Doc d
+derefUpdater (RootDereferer f) acc u dc =
     Updater <|
         \d ->
             let
-                (Accessor paths rr) =
+                (Accessor rs rr) =
                     acc d
             in
             case Remote.toMaybe rr of
                 Nothing ->
                     { value = d
-                    , updates = Path.empty
-                    , requests = paths
+                    , requests = Slice.also rs Get Slice.nothing
                     , afterwards =
                         case rr of
                             Loading ->
-                                derefUpdater (Dereferer f) acc u dc
+                                derefUpdater (RootDereferer f) acc u dc
 
                             _ ->
                                 noUpdater
                     }
 
                 Just (Reference path) ->
-                    case f <| Path.toIds path of
-                        ( [], Lens _ upd_ ) ->
-                            let
-                                upds =
-                                    runUpdater (upd_ u dc) d
-                            in
-                            { upds
-                                | requests =
-                                    Path.append paths
-                                        upds.requests
+                    let
+                        (Lens l) =
+                            f path
+
+                        updates upds =
+                            { value = upds.value
+                            , requests = Slice.also rs Get upds.requests
+                            , afterwards =
+                                Updater <| runUpdater upds.afterwards >> updates
                             }
-
-                        _ ->
-                            noUpdates d
-
-
-deref :
-    Dereferer d (Document s r)
-    -> Lens d (Reference s r)
-    -> Lens d (Document s r)
-deref drf (Lens acc _) =
-    Lens
-        (\d -> derefAccessor drf (acc d) d)
-        (derefUpdater drf acc)
-
-
-fail : Path -> Lens a b
-fail path =
-    Lens (\_ -> Accessor (Path.singleton path ()) Failure)
-        (\_ _ -> noUpdater)
+                    in
+                    updates <| runUpdater (l.update u dc) d
 
 
 

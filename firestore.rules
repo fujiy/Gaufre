@@ -1,42 +1,71 @@
 rules_version = '2';
 service cloud.firestore {
-    match /databases/{database}/documents {
+  match /databases/{database}/documents {
 
-        function isAuth() {
-            return request.auth != null;
-        }
-        function isUserAuth(userId) {
-            return request.auth != null && request.auth.uid == userId;
-        }
-        function userPath(userId) {
-            return /databases/$(database)/documents/users/$(userId);
-        }
-        function projectPath(projectId) {
-            return /databases/$(database)/documents/projects/$(projectId);
-        }
-        function isMemberOfProject() {
-            return userPath(request.auth.uid) in request.resource.data.members;
-        }
-        function isMemberOf(projectId) {
-            return userPath(request.auth.uid)
-                in get(projectPath(projectId)).data.members;
-        }
-
-        match /clients/{userId} {
-            allow read, write: if isUserAuth(userId);
-        }
-
-        match /users/{userId} {
-            allow get: if isAuth();
-            allow write: if isUserAuth(userId);
-        }
-
-        match /projects/{projectId} {
-            allow get: if isAuth();
-            allow read, write: if isAuth() && isMemberOfProject();
-        }
-        match /projects/{projectId}/works/{workId} {
-            allow read, write: if isAuth() && isMemberOf(projectId);
-        }
+    function userPath(userId) {
+      return /databases/$(database)/documents/users/$(userId);
     }
+    function projectPath(projectId) {
+      return /databases/$(database)/documents/projects/$(projectId);
+    }
+    function user() {
+      return userPath(request.auth.uid);
+    }
+
+    function isAuth() {
+      return request.auth != null;
+    }
+    function isUserAuth(userId) {
+      return request.auth != null && request.auth.uid == userId;
+    }
+
+    // Project
+    function isMemberOf(projectId) {
+      return user() in get(projectPath(projectId)).data.members;
+    }
+    function isAdminOf(projectId) {
+      return user() in get(projectPath(projectId)).data.admins;
+    }
+    function isOwnerOf(projectId) {
+      return user() == get(projectPath(projectId)).data.owner;
+    }
+    function isMemberOfIt() {
+      return user() in resource.data.members;
+    }
+    function isAdminOfIt() {
+      return user() in resource.data.admins;
+    }
+    function isOwnerOfIt() {
+      return user() == resource.data.owner;
+    }
+
+    // Work
+    function isStaffOfIt() {
+      return user() in resource.data.staffs;
+    }
+
+
+    match /clients/{userId} {
+      allow read, write: if isUserAuth(userId);
+    }
+
+    match /users/{userId} {
+      allow read:  if isAuth();
+      allow write: if isUserAuth(userId);
+    }
+
+    match /projects/{projectId} {
+      allow get:    if isAuth();
+      allow read:   if isMemberOfIt();
+      allow update: if isAdminOfIt();
+      // && request.resource.data.owner == resource.data.owner;
+      allow delete: if isOwnerOfIt();
+      allow create: if user() == request.resource.data.owner
+    }
+    match /projects/{projectId}/works/{workId} {
+      allow get, list:      if isMemberOf(projectId);
+      allow update:         if isStaffOfIt() || isAdminOf(projectId);
+      allow create, delete: if isAdminOf(projectId);
+    }
+  }
 }

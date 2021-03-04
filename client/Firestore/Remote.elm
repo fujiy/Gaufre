@@ -1,5 +1,7 @@
 module Firestore.Remote exposing (..)
 
+import Json.Decode as Decode exposing (Decoder)
+import Json.Encode as Encode exposing (Value)
 import Util exposing (uncurry)
 
 
@@ -133,3 +135,58 @@ traverse f default rx =
 
         UpToDate x ->
             f UpToDate x
+
+
+encode : (a -> Value) -> Remote a -> Value
+encode enc ra =
+    let
+        ( status, v ) =
+            case ra of
+                Loading ->
+                    ( "loading", Encode.null )
+
+                Failure ->
+                    ( "failure", Encode.null )
+
+                Committing a ->
+                    ( "committing", enc a )
+
+                UpToDate a ->
+                    ( "uptodate", enc a )
+    in
+    Encode.object
+        [ ( "status", Encode.string status )
+        , ( "value", v )
+        ]
+
+
+decode : Decoder a -> Decoder (Remote a)
+decode dec =
+    Decode.andThen
+        (\t ->
+            case t of
+                ( "loading", _ ) ->
+                    Decode.succeed Loading
+
+                ( "failure", _ ) ->
+                    Decode.succeed Failure
+
+                ( "committing", Nothing ) ->
+                    Decode.fail "no value"
+
+                ( "committing", Just a ) ->
+                    Decode.succeed <| Committing a
+
+                ( "uptodate", Nothing ) ->
+                    Decode.fail "no value"
+
+                ( "uptodate", Just a ) ->
+                    Decode.succeed <| UpToDate a
+
+                _ ->
+                    Decode.fail "unknown state"
+        )
+    <|
+        Decode.map2 Tuple.pair
+            (Decode.field "status" Decode.string)
+            (Decode.field "value" <| Decode.nullable dec)

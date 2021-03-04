@@ -1,36 +1,83 @@
 module Firestore.Update exposing (..)
 
+import Array exposing (Array)
+import Array.Extra as Array
 import Firestore.Desc exposing (DocumentDesc(..))
 import Firestore.Internal as Internal exposing (..)
 import Firestore.Path as Path
+import Firestore.Path.Map as PathMap
+import Firestore.Path.Map.Slice as Slice
 import Firestore.Remote as Remote exposing (Remote(..))
 import List.Extra as List
 import Maybe.Extra as Maybe
 import Util exposing (..)
 
 
-type alias Updater a =
-    Internal.Updater a
+type Updater a
+    = Updater (a -> Updates a)
+
+
+type alias Updates a =
+    { value : a
+    , requests : PathMap.Map Request
+    , afterwards : Updater a
+    }
+
+
+runUpdater : Updater a -> a -> Updates a
+runUpdater (Updater f) =
+    f
 
 
 all : List (Updater a) -> Updater a
-all upds =
-    List.foldr both noUpdater upds
+all =
+    List.foldr both none
 
 
 none : Updater a
 none =
-    noUpdater
+    Updater noUpdates
 
 
-set : Lens a (Document s r) -> DocumentDesc s r -> r -> Updater a
-set (Lens _ upd) (DocumentDesc d) r =
-    upd (Set <| d.encoder <| Committing r) (Document d.empty (Committing r))
+noUpdates : a -> Updates a
+noUpdates a =
+    Updates a PathMap.empty none
 
 
-delete : Lens a (Document s r) -> DocumentDesc s r -> Updater a
-delete (Lens _ upd) (DocumentDesc d) =
-    upd (Set <| d.encoder Failure) (Document d.empty Failure)
+fromDoc : Internal.Updater Root Doc a -> Updater a
+fromDoc (Internal.Updater f) =
+    Updater <|
+        \a ->
+            let
+                upd =
+                    f a
+            in
+            { value = upd.value
+            , requests =
+                Slice.toMapDoc mergeRequest Get upd.requests
+            , afterwards = fromDoc upd.afterwards
+            }
+
+
+set :
+    Lens Root a Doc (Document s r)
+    -> DocumentDesc s r
+    -> r
+    -> Updater a
+set (Lens l) (DocumentDesc d) r =
+    l.update
+        (Set <| d.encoder <| Committing r)
+        (Document d.empty (Committing r))
+        |> fromDoc
+
+
+delete :
+    Lens Root a Doc (Document s r)
+    -> DocumentDesc s r
+    -> Updater a
+delete (Lens l) (DocumentDesc d) =
+    l.update (Set <| d.encoder Failure) (Document d.empty Failure)
+        |> fromDoc
 
 
 type Alter a
@@ -40,18 +87,18 @@ type Alter a
 
 
 alter :
-    Lens a (Document s r)
+    Lens Root a Doc (Document s r)
     -> DocumentDesc s r
     -> (Maybe r -> Alter r)
     -> Updater a
-alter (Lens acc upd) (DocumentDesc d) f =
+alter (Lens l) (DocumentDesc d) f =
     let
         updater _ =
             Updater <|
                 \a ->
                     let
                         (Accessor paths rd) =
-                            acc a
+                            l.access a
 
                         s =
                             Remote.toMaybe rd
@@ -78,19 +125,20 @@ alter (Lens acc upd) (DocumentDesc d) f =
                             in
                             case mu of
                                 Just u ->
-                                    upd u (Document s newR)
+                                    l.update u (Document s newR)
+                                        |> fromDoc
                                         |> flip runUpdater a
 
                                 Nothing ->
-                                    Internal.noUpdates a
+                                    noUpdates a
                     in
                     case
                         Remote.andThen (\(Document _ rr) -> rr) rd
                     of
                         Loading ->
                             { value = a
-                            , updates = Path.empty
-                            , requests = paths
+                            , requests =
+                                Slice.toMapDoc mergeRequest Get paths
                             , afterwards = updater ()
                             }
 
@@ -106,7 +154,11 @@ alter (Lens acc upd) (DocumentDesc d) f =
     updater ()
 
 
-modify : Lens a (Document s r) -> DocumentDesc s r -> (r -> r) -> Updater a
+modify :
+    Lens Root a Doc (Document s r)
+    -> DocumentDesc s r
+    -> (r -> r)
+    -> Updater a
 modify l d f =
     alter l d <|
         Maybe.unwrap NoChange
@@ -123,7 +175,7 @@ modify l d f =
             )
 
 
-default : Lens a (Document s r) -> DocumentDesc s r -> r -> Updater a
+default : Lens Root a Doc (Document s r) -> DocumentDesc s r -> r -> Updater a
 default l d r =
     alter l d <| Maybe.unwrap (Update r) (always NoChange)
 
@@ -140,8 +192,7 @@ both (Updater f) (Updater g) =
                     g ux.value
             in
             { value = uy.value
-            , updates = Path.merge always uy.updates ux.updates
-            , requests = Path.append ux.requests uy.requests
+            , requests = PathMap.merge mergeRequest ux.requests uy.requests
             , afterwards = both ux.afterwards uy.afterwards
             }
 
@@ -157,20 +208,30 @@ list updater bs =
                             runUpdater (updater b) a
                     in
                     { value = upd.value :: upds.value
-                    , updates =
-                        Path.merge
-                            mergeUpdate
-                            upd.updates
-                            upds.updates
                     , requests =
-                        Path.append upd.requests upds.requests
-                    , afterwards =
-                        both upds.afterwards <| list updater bs
+                        PathMap.merge mergeRequest upd.requests upds.requests
+                    , afterwards = both upds.afterwards <| list updater bs
                     }
                 )
-                { value = []
-                , updates = Path.empty
-                , requests = Path.empty
-                , afterwards = noUpdater
-                }
+                (noUpdates [])
                 (List.zip xs bs)
+
+
+array : (b -> Updater a) -> Array b -> Updater (Array a)
+array updater bs =
+    Updater <|
+        \xs ->
+            Array.foldl
+                (\( a, b ) upds ->
+                    let
+                        upd =
+                            runUpdater (updater b) a
+                    in
+                    { value = Array.push upd.value upds.value
+                    , requests =
+                        PathMap.merge mergeRequest upd.requests upds.requests
+                    , afterwards = both upds.afterwards <| array updater bs
+                    }
+                )
+                (noUpdates Array.empty)
+                (Array.zip xs bs)

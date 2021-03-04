@@ -154,7 +154,6 @@ update auth msg model =
                                 |> Cmd.map
                                     (Result.map
                                         (AddProjectProcess file.id process)
-                                        >> Result.mapError (Debug.log "ERR")
                                         >> Result.withDefault None
                                     )
             )
