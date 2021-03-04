@@ -10,13 +10,15 @@ import Firestore exposing (..)
 import Firestore.Access as Access exposing (Accessor)
 import Firestore.Lens as Lens exposing (o)
 import Firestore.Path as Path exposing (Id)
-import Firestore.Remote exposing (Remote(..))
+import Firestore.Remote as Remote exposing (Remote(..))
 import Firestore.Update as Update exposing (Updater)
 import GDrive
 import Html exposing (Html, a, button, div, input, node, text)
 import Html.Attributes exposing (class, href, placeholder, style, type_)
 import Html.Events exposing (on, onClick, onInput)
 import Json.Decode as Decode
+import List
+import List.Extra as List
 import Maybe.Extra as Maybe
 import Util exposing (..)
 
@@ -198,14 +200,30 @@ remote r f =
 
 view : Auth -> Model -> Data -> Accessor Data (Html Msg)
 view auth model data =
-    flip Access.andThen
+    flip2 Access.andThen2
         (Access.access
-            (o (Data.myProjects auth) <| Lens.list Lens.getRemote)
+            (o (Data.myProjects auth) <| Lens.getAllRemote)
             data
-            |> Access.map (List.indexedMap Tuple.pair)
         )
+        (Access.access (o (Data.myClient auth) Lens.get) data)
     <|
-        \projects ->
+        \projects_ client ->
+            let
+                projects =
+                    List.filterMap
+                        (\p ->
+                            Array.toList client.projects
+                                |> List.findIndex
+                                    (\ref ->
+                                        Firestore.getId ref
+                                            == Remote.unwrap "" .id p
+                                    )
+                                |> Maybe.map
+                                    (\i -> ( i, p ))
+                        )
+                        projects_
+                        |> List.sortBy Tuple.first
+            in
             Access.map
                 (\html ->
                     div []

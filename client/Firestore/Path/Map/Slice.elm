@@ -4,6 +4,7 @@ import Array exposing (Array)
 import Dict
 import Firestore.Path as Path exposing (Id)
 import Firestore.Path.Map as Map exposing (..)
+import Json.Encode as Encode exposing (Value)
 
 
 type alias Slice p q =
@@ -40,6 +41,15 @@ doc id d =
     singleton <| Col Nothing (Dict.singleton id d) Dict.empty
 
 
+query : String -> String -> Value -> Slice (Col a) (Col a)
+query field op value c =
+    let
+        v =
+            Encode.encode 0 value
+    in
+    singleton <| Col Nothing Dict.empty (Dict.singleton ( field, op, v ) c)
+
+
 subCol : Id -> Slice (Doc a) (Col a)
 subCol id c =
     singleton <| Doc Nothing (Dict.singleton id c)
@@ -55,7 +65,7 @@ colItem a =
     singleton <| Col (Just a) Dict.empty Dict.empty
 
 
-addCol : Slice (Map a) (Col a) -> Col a -> Slice (Map a) (Col a)
+addCol : Slice x (Col a) -> Col a -> Slice x (Col a)
 addCol s ac c =
     Array.append (s ac) (s c)
 

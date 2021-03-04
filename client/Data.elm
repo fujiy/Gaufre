@@ -7,8 +7,8 @@ import Data.Project as Project exposing (Project)
 import Data.User as User exposing (User)
 import Firestore exposing (..)
 import Firestore.Desc as Desc exposing (FirestoreDesc)
-import Firestore.Lens as Lens exposing (o)
-import Firestore.Path exposing (Id)
+import Firestore.Lens as Lens exposing (QueryOp(..), o)
+import Firestore.Path as Path exposing (Id)
 import Firestore.Update as Update exposing (Updater)
 import Maybe.Extra as Maybe
 
@@ -61,17 +61,29 @@ me auth =
     o users <| Lens.doc auth.uid
 
 
+userRef : Id -> User.Reference
+userRef id =
+    Firestore.ref <| Path.fromIds [ "users", id ]
+
+
 
 -- Project
 
 
-myProjects : Auth -> Lens Root Data Doc (List Project.Document)
+myProjects : Auth -> Lens Root Data Col Project.Collection
 myProjects auth =
-    Lens.derefs projects Lens.end <|
-        o (myClient auth) <|
-            o Lens.get <|
-                o Client.projects <|
-                    Lens.fromIso (Lens.reverse Lens.list2array)
+    o projects <|
+        Lens.where_ "members" CONTAINS Desc.reference (userRef auth.uid)
+
+
+
+-- myProjects : Auth -> Lens Root Data Doc (List Project.Document)
+-- myProjects auth =
+--     Lens.derefs projects Lens.end <|
+--         o (myClient auth) <|
+--             o Lens.get <|
+--                 o Client.projects <|
+--                     Lens.fromIso (Lens.reverse Lens.list2array)
 
 
 currentProject : Auth -> Int -> Lens Root Data Doc Project.Document
@@ -99,13 +111,6 @@ projectMembers : Project -> Lens Root Data Doc (List User.Document)
 projectMembers p =
     Lens.derefs users Lens.end <|
         Lens.const p.members
-
-
-
--- o (myClient auth) <|
---     o Lens.get <|
---         Lens.composeIso Client.projects (Lens.reverse Lens.list2array)
--- Firestore
 
 
 desc : FirestoreDesc Data

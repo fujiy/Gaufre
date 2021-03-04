@@ -11,15 +11,12 @@ import Json.Encode as Encode exposing (Value)
 import List.Extra as List
 
 
-type Collections r
-    = Collections r
-
-
 type Collection s r
     = Collection
         { name : Id
         , empty : s
         , docs : Dict Id (Document s r)
+        , q : Dict QueryKey (Collection s r)
         }
 
 
@@ -31,8 +28,8 @@ type Reference s r
     = Reference Path
 
 
-type Query
-    = Query String String Value
+type alias QueryKey =
+    String
 
 
 type alias Lens_ p a q b =
@@ -82,6 +79,11 @@ type Request
     | Set Value
     | Add Value
     | Delete
+
+
+queryKey : String -> String -> Value -> QueryKey
+queryKey field op value =
+    field ++ op ++ Encode.encode 0 value
 
 
 runUpdater : Updater p q a -> a -> Updates p q a

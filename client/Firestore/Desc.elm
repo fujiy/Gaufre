@@ -164,58 +164,97 @@ collection :
     -> CollectionDesc (Collection s a -> l) r
     -> CollectionDesc l r
 collection name getter (DocumentDesc d) (CollectionDesc c) =
-    CollectionDesc
-        { applier =
-            \cpvs r ->
-                Result.map2 identity
-                    (c.applier cpvs r)
-                    (let
-                        (Collection col) =
-                            getter r
-
-                        upds =
-                            Dict.get name cpvs
-                                |> Maybe.withDefault PathMap.emptyCol
-                                |> PathMap.subDocs
-                                |> Dict.toList
-                     in
-                     List.foldr
-                        (\( id, dpv ) rd ->
-                            let
-                                (Document sub doc) =
-                                    Dict.get id col.docs
-                                        |> Maybe.withDefault
-                                            (Document d.empty Loading)
-
-                                sub_ =
-                                    d.applier dpv sub
-
-                                doc_ =
-                                    PathMap.getDocRoot dpv
-                                        |> Maybe.unwrap (Ok doc)
-                                            (Decode.decodeValue d.decoder)
-                            in
-                            Result.map2
-                                (Dict.insert id)
-                                (Result.map2 Document sub_ doc_)
-                                rd
-                        )
-                        (Ok col.docs)
-                        upds
-                        |> Result.map
-                            (\dic -> Collection { col | docs = dic })
-                    )
-        , empty =
+    let
+        empty =
             c.empty <|
-                Collection { name = name, empty = d.empty, docs = Dict.empty }
-        }
+                Collection
+                    { name = name
+                    , empty = d.empty
+                    , docs = Dict.empty
+                    , q = Dict.empty
+                    }
+
+        applier_ cpvs r =
+            Result.map2 identity
+                (c.applier cpvs r)
+                (applier cpvs <| getter r)
+
+        applier cpvs (Collection col) =
+            let
+                -- (Collection col) =
+                --     getter r
+                cpv =
+                    Dict.get name cpvs
+                        |> Maybe.withDefault PathMap.emptyCol
+            in
+            Result.map2
+                (\docs q ->
+                    Collection { col | docs = docs, q = q }
+                )
+                (List.foldr
+                    (\( id, dpv ) rd ->
+                        let
+                            (Document sub doc) =
+                                Dict.get id col.docs
+                                    |> Maybe.withDefault
+                                        (Document d.empty Loading)
+
+                            sub_ =
+                                d.applier dpv sub
+
+                            doc_ =
+                                PathMap.getDocRoot dpv
+                                    |> Maybe.unwrap (Ok doc)
+                                        (Decode.decodeValue d.decoder)
+                        in
+                        Result.map2
+                            (Dict.insert id)
+                            (Result.map2 Document sub_ doc_)
+                            rd
+                    )
+                    (Ok col.docs)
+                    (PathMap.subDocs cpv |> Dict.toList)
+                )
+                (List.foldr
+                    (\qpv rq ->
+                        let
+                            key =
+                                queryKey qpv.field qpv.op qpv.value
+
+                            qcol =
+                                Dict.get key col.q
+                                    |> Maybe.withDefault
+                                        (Collection
+                                            { name = name
+                                            , empty = d.empty
+                                            , docs = Dict.empty
+                                            , q = Dict.empty
+                                            }
+                                        )
+
+                            -- qcol__ =
+                            --     PathMap.getColRoot qpv.q
+                            --         |> Maybe.unwrap (Ok qcol)
+                            --             (Decode.decodeValue d.decoder)
+                            -- qcol_ =
+                            --     Debug.todo ""
+                            qcol_ =
+                                applier (Dict.singleton name qpv.col) qcol
+                        in
+                        Result.map2 (Dict.insert key) qcol_ rq
+                    )
+                    (Ok col.q)
+                    (PathMap.subQueries cpv)
+                )
+    in
+    CollectionDesc { applier = applier_, empty = empty }
 
 
 reference : Desc (Reference s r)
 reference =
     Desc
         (\(Reference p) ->
-            Encode.object [ ( "__path__", path.encoder p ) ]
+            Encode.object [ ( "__path", path.encoder p ) ]
         )
         (Decode.field "path" Decode.string
             |> Decode.map (Path.fromString >> Reference)

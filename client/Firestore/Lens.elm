@@ -1,10 +1,9 @@
 module Firestore.Lens exposing (..)
 
--- import Firestore.Desc exposing (Desc, paths)
-
 import Array exposing (Array, slice)
 import Dict
 import Firestore.Access as Access
+import Firestore.Desc exposing (Desc)
 import Firestore.Internal exposing (..)
 import Firestore.Path as Path exposing (Id, Path)
 import Firestore.Path.Map as PathMap
@@ -250,41 +249,113 @@ doc id =
         }
 
 
+type QueryOp
+    = EQ
+    | NE
+    | GT
+    | GE
+    | LT
+    | LE
+    | IN
+    | NOT_IN
+    | CONTAINS
+    | CONTAINS_ANY
 
--- equal : String -> Desc a -> a -> Query
--- equal field desc a =
---     Query field "==" <| desc.encoder a
--- where_ : Query -> Lens (Collection s r) (Collection s r)
--- where_ q =
---     Debug.todo ""
+
+opToString : QueryOp -> String
+opToString op =
+    case op of
+        EQ ->
+            "=="
+
+        NE ->
+            "!="
+
+        GT ->
+            ">"
+
+        GE ->
+            ">="
+
+        LT ->
+            "<"
+
+        LE ->
+            "<="
+
+        IN ->
+            "in"
+
+        NOT_IN ->
+            "not-in"
+
+        CONTAINS ->
+            "array-contains"
+
+        CONTAINS_ANY ->
+            "array-contains-any"
 
 
-getAllRemote : Lens Col (Collection s r) Item (List ( Id, Remote r ))
+where_ :
+    String
+    -> QueryOp
+    -> Desc a
+    -> a
+    -> Lens Col (Collection s r) Col (Collection s r)
+where_ field qop desc a =
+    let
+        op =
+            opToString qop
+
+        value =
+            desc.encoder a
+
+        key =
+            queryKey field op value
+    in
+    Lens
+        { access =
+            \(Collection col) ->
+                Accessor
+                    (Slice.query field op value)
+                    (Dict.get key col.q
+                        |> Maybe.withDefault
+                            (Collection
+                                { col | docs = Dict.empty, q = Dict.empty }
+                            )
+                        |> UpToDate
+                    )
+        , update =
+            \u qc ->
+                Updater <|
+                    \(Collection col) ->
+                        { value =
+                            Collection
+                                { col | q = Dict.insert key qc col.q }
+                        , requests =
+                            Slice.addCol
+                                (Slice.query field op value)
+                                (PathMap.colRootItem u)
+                        , afterwards = noUpdater
+                        }
+        }
+
+
+getAllRemote : Lens Col (Collection s r) Item (List (Remote r))
 getAllRemote =
     Lens
         { access =
             \(Collection col) ->
                 Accessor Slice.colItem
-                    (Dict.toList col.docs
-                        |> List.map (\( id, Document _ r ) -> ( id, r ))
+                    (Dict.values col.docs
+                        |> List.map (\(Document _ r) -> r)
                         |> UpToDate
                     )
         , update =
-            \_ xs ->
+            \_ _ ->
                 Updater <|
-                    \(Collection col) ->
-                        { value =
-                            Collection
-                                { col
-                                    | docs =
-                                        List.foldr
-                                            (\( id, r ) ->
-                                                Dict.insert id <|
-                                                    Document col.empty r
-                                            )
-                                            col.docs
-                                            xs
-                                }
+                    \col ->
+                        { value = col
                         , requests = Slice.colItem
                         , afterwards = noUpdater
                         }
@@ -301,7 +372,14 @@ getAll =
                         |> List.filterMap (\(Document _ r) -> Remote.toMaybe r)
                         |> UpToDate
                     )
-        , update = \_ _ -> noUpdater
+        , update =
+            \_ _ ->
+                Updater <|
+                    \col ->
+                        { value = col
+                        , requests = Slice.colItem
+                        , afterwards = noUpdater
+                        }
         }
 
 

@@ -9,7 +9,7 @@ function initialize(app) {
         array.push(encode(value));
       }
       return array;
-    } else if (object.__path__) return reference(object.__path__);
+    } else if (object.__path) return reference(object.__path);
     else {
       let newobj = {};
       for (const [key, value] of Object.entries(object)) {
@@ -37,7 +37,7 @@ function initialize(app) {
         case "query":
           return goCol(
             colPath.sub,
-            ref.where(colPath.field, colPath.op, colPath.value)
+            ref.where(colPath.field, colPath.op, encode(colPath.value))
           );
         default:
           return null;
@@ -63,20 +63,6 @@ function initialize(app) {
         return null;
     }
   }
-
-  // function reference(path) {
-  //   let ref = db;
-  //   let i = 0;
-  //   while (true) {
-  //     if (i >= path.length) break;
-  //     ref = ref.collection(path[i]);
-  //     i++;
-  //     if (i >= path.length) break;
-  //     ref = ref.doc(path[i]);
-  //     i++;
-  //   }
-  //   return ref;
-  // }
 
   function makePathMap(path, item) {
     path = path.split("/");
@@ -113,29 +99,29 @@ function initialize(app) {
     }
     obj.item = sub.item;
     obj.id = path[i - 1];
-    obj.q = [];
+    obj.q = sub.q || [];
     obj.sub = sub.sub;
     return object.sub;
   }
 
   function queryKey(item) {
-    return item.field + item.op + Json.stringify(item.value);
+    return item.field + item.op + JSON.stringify(item.value);
   }
 
   function listen(rootMap) {
-    function goCol(colMap, tree, ref) {
+    function goCol(colMap, tree, ref, builder) {
       if (colMap.item && !tree._listener) {
         tree._listener = ref.onSnapshot(
           {
             includeMetadataChanges: true,
           },
           (querySnapshot) => {
-            const map = { item: null, sub: [] };
+            const map = { item: null, sub: [], q: [] };
             querySnapshot.forEach((doc) => {
               map.sub.push({ item: makeDoc(doc), sub: [], id: doc.id });
             });
-            const updates = makePathMapAt(ref.path, map);
 
+            const updates = builder(map);
             console.log("snapshots", showPathMap(updates));
 
             if (!querySnapshot.metadata.hasPendingWrites)
@@ -146,87 +132,56 @@ function initialize(app) {
 
       for (const doc of colMap.sub) {
         if (!tree[doc.id]) tree[doc.id] = {};
-        goDoc(doc, tree[doc.id], ref.doc(doc.id));
+        goDoc(doc, tree[doc.id], ref.doc(doc.id), (m) => {
+          m.id = doc.id;
+          return builder({ item: null, sub: [m], q: [] });
+        });
       }
       for (const col of colMap.q) {
         if (!tree[queryKey(col)]) tree[queryKey(col)] = {};
         goCol(
           col,
           tree[queryKey(col)],
-          ref.where(col.field, col.op, col.value)
+          ref.where(col.field, col.op, encode(col.value)),
+          (m) => {
+            m.field = col.field;
+            m.op = col.op;
+            m.value = col.value;
+            return builder({ item: null, sub: [], q: [m] });
+          }
         );
       }
     }
 
-    function goDoc(docMap, tree, ref) {
+    function goDoc(docMap, tree, ref, builder) {
       if (docMap.item && !tree._listener) {
         tree._listener = ref.onSnapshot(
           { includeMetadataChanges: true },
           (doc) => {
-            const updates = makePathMap(ref.path, makeDoc(doc));
+            const updates = builder({ item: makeDoc(doc), sub: [] });
 
-            console.log("snapshot", updates, showPathMap(updates)[0]);
+            console.log("snapshot", showPathMap(updates)[0]);
             if (!doc.metadata.hasPendingWrites) sendSub({ updates: updates });
           }
         );
       }
       for (const col of docMap.sub) {
         if (!tree[col.id]) tree[col.id] = {};
-        goCol(col, tree[col.id], ref.collection(col.id));
+        goCol(col, tree[col.id], ref.collection(col.id), (m) => {
+          m.id = col.id;
+          return builder({ item: null, sub: [m] });
+        });
       }
     }
 
     for (const col of rootMap) {
       if (!listeners[col.id]) listeners[col.id] = {};
-      goCol(col, listeners[col.id], db.collection(col.id));
+      goCol(col, listeners[col.id], db.collection(col.id), (m) => {
+        m.id = col.id;
+        return [m];
+      });
     }
   }
-
-  // function listen(path, paths, tree) {
-  //   if (path.length > 0 && paths.item && !tree._listener) {
-  //     if (path.length % 2 == 1) {
-  //       tree._listener = reference(path).onSnapshot(
-  //         {
-  //           includeMetadataChanges: true,
-  //         },
-  //         (querySnapshot) => {
-  //           const map = { item: null, sub: {} };
-  //           querySnapshot.forEach((doc) => {
-  //             map.sub[doc.id] = { item: makeDoc(doc), sub: {} };
-  //           });
-  //           const updates = makePathMapAt(path, map);
-
-  //           console.log(
-  //             "snapshots",
-  //             querySnapshot.metadata,
-  //             showPathMap(updates)
-  //           );
-  //           if (!querySnapshot.metadata.hasPendingWrites)
-  //             sendSub({ updates: updates });
-  //         }
-  //       );
-  //     } else {
-  //       tree._listener = reference(path).onSnapshot(
-  //         {
-  //           includeMetadataChanges: true,
-  //         },
-  //         (doc) => {
-  //           const updates = makePathMap(path, makeDoc(doc));
-
-  //           console.log("snapshot", doc.metadata, showPathMap(updates)[0]);
-  //           if (!doc.metadata.hasPendingWrites) sendSub({ updates: updates });
-  //         }
-  //       );
-  //     }
-  //   }
-
-  //   for (const [id, subPaths] of Object.entries(paths.sub)) {
-  //     if (!tree[id]) tree[id] = {};
-  //     const subPath = path.slice();
-  //     subPath.push(id);
-  //     listen(subPath, subPaths, tree[id]);
-  //   }
-  // }
 
   function unlisten(rootMap) {
     function goCol(colMap, tree) {
@@ -260,17 +215,6 @@ function initialize(app) {
     }
   }
 
-  // function unlisten(paths, tree) {
-  //   if (!tree) return;
-  //   if (paths.item && tree._listener) {
-  //     tree._listener();
-  //     tree._listener = null;
-  //   }
-  //   for (const [id, subPaths] of Object.entries(paths.sub)) {
-  //     unlisten(subPaths, tree[id]);
-  //   }
-  // }
-
   function update(rootMap) {
     function goCol(colMap, ref) {
       if (colMap.item) {
@@ -285,7 +229,7 @@ function initialize(app) {
         goDoc(doc, ref.doc(doc.id));
       }
       for (const col of colMap.q) {
-        goCol(col, ref.where(col.field, col.op, col.value));
+        goCol(col, ref.where(col.field, col.op, encode(col.value)));
       }
     }
 
@@ -310,23 +254,6 @@ function initialize(app) {
     }
   }
 
-  // function update(path, pathMap) {
-  //   if (pathMap.item) {
-  //     const upd = pathMap.item;
-  //     console.log("update", path, upd);
-  //     switch (upd.type) {
-  //       case "set":
-  //         reference(path).set(encode(upd.value.value));
-  //         break;
-  //     }
-  //   }
-  //   for (const [id, subMap] of Object.entries(pathMap.sub)) {
-  //     const subPath = path.slice();
-  //     subPath.push(id);
-  //     update(subPath, subMap);
-  //   }
-  // }
-
   function showPathMap(rootMap) {
     function goCol(colMap, path, result) {
       if (colMap.item) {
@@ -342,7 +269,9 @@ function initialize(app) {
       }
       for (const col of colMap.q) {
         const subPath = path.slice();
-        subPath.push([col.field, col.op, col.value]);
+        subPath.push(
+          col.field + " " + col.op + " " + JSON.stringify(col.value)
+        );
         goCol(col, subPath, result);
       }
       return result;
@@ -372,23 +301,6 @@ function initialize(app) {
     return rootResult;
   }
 
-  // function showPathMap(pm) {
-  //   function go(path, pathMap, result) {
-  //     if (pathMap.item) {
-  //       const r = path.slice();
-  //       r.push(pathMap.item);
-  //       result.push(r);
-  //     }
-  //     for (const subMap of pathMap.sub) {
-  //       const subPath = path.slice();
-  //       subPath.push(subMap.id);
-  //       go(subPath, subMap, result);
-  //     }
-  //     return result;
-  //   }
-  //   return go([], { sub: pm }, []);
-  // }
-
   function sendSub(v) {
     // console.log("sub", v);
     if (app.ports.firestoreSubPort) app.ports.firestoreSubPort.send(v);
@@ -402,6 +314,7 @@ function initialize(app) {
     app.ports.firestoreCmdPort.subscribe((v) => {
       console.log(
         "command",
+        v,
         showPathMap(v.listen),
         showPathMap(v.unlisten),
         showPathMap(v.updates)
