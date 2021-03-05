@@ -3,6 +3,9 @@ module Data.Work exposing (..)
 import Data.User as User exposing (User)
 import Firestore exposing (..)
 import Firestore.Desc as Desc exposing (DocumentDesc)
+import Html exposing (Html, div, text)
+import Html.Attributes exposing (class)
+import Util exposing (icon)
 
 
 type alias Id =
@@ -14,14 +17,6 @@ type alias ProcessId =
 
 
 type alias PartId =
-    String
-
-
-type alias Part =
-    String
-
-
-type alias WorkId =
     String
 
 
@@ -115,3 +110,56 @@ iconClass status =
 
         Complete ->
             "check"
+
+
+statusLabel : Status -> Html msg
+statusLabel status =
+    let
+        ( header, cls ) =
+            case status of
+                NotAssigned ->
+                    ( "担当者がいません", "red" )
+
+                Waiting ->
+                    ( "前工程待ち", "" )
+
+                InProgress ->
+                    ( "作業中", "" )
+
+                Reviewing ->
+                    ( "チェック中", "" )
+
+                Complete ->
+                    ( "完了", "green" )
+    in
+    div [ class "ui label", class cls ]
+        [ icon <| iconClass status
+        , text header
+        ]
+
+
+statusNumber : Status -> Int
+statusNumber status =
+    case status of
+        NotAssigned ->
+            0
+
+        Waiting ->
+            1
+
+        InProgress ->
+            2
+
+        Reviewing ->
+            3
+
+        Complete ->
+            4
+
+
+
+-- div [ class "ui icon mini message", class cls ]
+--     [ icon <| iconClass status
+--     , div [ class "content" ]
+--         [ div [ class "header" ] [ text header ] ]
+--     ]

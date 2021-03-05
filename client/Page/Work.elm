@@ -349,6 +349,9 @@ view auth model data project =
     <|
         \work members ->
             let
+                isAdmin =
+                    Data.isAdmin auth project
+
                 process =
                     Dict.get work.process project.processes
                         |> Maybe.withDefault Project.nullProcess
@@ -433,12 +436,12 @@ view auth model data project =
                             , div [ class "content" ]
                                 [ Html.p []
                                     [ text "担当："
-                                    , User.selectionList members staffs []
+                                    , User.list isAdmin members staffs []
                                         |> Html.map SetWorkStaffs
                                     ]
                                 , Html.p []
                                     [ text "チェック："
-                                    , User.selectionList members reviewers []
+                                    , User.list isAdmin members reviewers []
                                         |> Html.map SetWorkReviewers
                                     ]
                                 ]

@@ -27,6 +27,11 @@ type alias Data =
     }
 
 
+isAdmin : Auth -> Project -> Bool
+isAdmin auth p =
+    List.any (Firestore.getId >> (==) auth.uid) p.admins
+
+
 
 -- Lenses
 -- Collection

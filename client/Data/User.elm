@@ -6,8 +6,8 @@ import Firestore
 import Firestore.Desc as Desc exposing (DocumentDesc)
 import Html exposing (Html, a, div, img, input, node, span, text)
 import Html.Attributes as Attr exposing (attribute, class, src, type_)
-import Html.Events
-import List
+import Html.Events exposing (onClick)
+import List.Extra as List
 import Set
 import Util exposing (onChangeValues)
 
@@ -55,9 +55,28 @@ desc =
 label : msg -> User -> Html msg
 label msg user =
     a
-        [ class "ui image label" ]
+        [ class "ui small image label"
+        , onClick msg
+        ]
         [ img [ src user.image ] []
         , text user.name
+        ]
+
+
+label_ : User -> Html msg
+label_ user =
+    div
+        [ class "ui small image label" ]
+        [ img [ src user.image ] []
+        , text user.name
+        ]
+
+
+avatar : User -> Html msg
+avatar user =
+    span []
+        [ img [ class "ui avatar image", src user.image ] []
+        , span [] [ text user.name ]
         ]
 
 
@@ -96,3 +115,25 @@ selectionList choices actives inactives =
                 )
                 choices
         ]
+
+
+list : Bool -> List User -> List Id -> List Id -> Html (List Id)
+list editable choices actives inactives =
+    if editable then
+        selectionList choices actives inactives
+
+    else
+        let
+            users =
+                List.filterMap
+                    (\id -> List.find (\user -> user.id == id) choices)
+                <|
+                    actives
+                        ++ inactives
+        in
+        if List.isEmpty users then
+            text "なし"
+
+        else
+            span [] <|
+                List.map label_ users

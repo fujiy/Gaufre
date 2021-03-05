@@ -14,7 +14,7 @@ import Firestore.Path as Path
 import Firestore.Remote exposing (Remote(..))
 import Firestore.Update as Update exposing (Updater)
 import GDrive exposing (FileMeta)
-import Html exposing (Html, div, table, tbody, td, text, th, thead, tr)
+import Html exposing (Html, div, span, table, tbody, td, text, th, thead, tr)
 import Html.Attributes exposing (class, style)
 import Html.Events exposing (onDoubleClick)
 import List.Extra as List
@@ -200,19 +200,25 @@ view auth model data project =
                     List.filter (isSelected model.selection) works_
             in
             div
-                [ style "min-height" "100vh"
-                , style "width" "100%"
+                [ --  style "min-height" "100vh"
+                  -- , style "width" "100%"
+                  class "ui grid"
                 , onMouseDownStop ClearSelection
                 ]
                 [ table
-                    [ class "ui definition celled table select-none"
+                    [ class "ui ten wide column definition celled table select-none"
                     ]
                     [ thead [] [ tableHeader model processes ]
                     , tbody [] <|
                         List.map (tableRow model processes works) parts
-                            ++ [ newPartButton project ]
+                            ++ (if Data.isAdmin auth project then
+                                    [ newPartButton project ]
+
+                                else
+                                    []
+                               )
                     ]
-                , actions members selection
+                , actions (Data.isAdmin auth project) members selection
                 ]
 
 
@@ -292,8 +298,8 @@ workCell model process part work =
         [ icon <| Work.iconClass <| Work.getStatus work ]
 
 
-actions : List User -> List Work -> Html Msg
-actions members selection =
+actions : Bool -> List User -> List Work -> Html Msg
+actions isAdmin members selection =
     let
         staffs =
             gatherList (.staffs >> List.map Firestore.getId) selection
@@ -301,53 +307,77 @@ actions members selection =
         reviewers =
             gatherList (.reviewers >> List.map Firestore.getId) selection
 
-        ( bottom, transition ) =
-            if List.isEmpty selection then
-                ( "-50vh", "" )
+        status =
+            List.map Work.getStatus selection
+                |> List.sortBy Work.statusNumber
+                |> List.uniqueBy Work.statusNumber
 
-            else
-                ( "0", "bottom 0.2s ease-out" )
+        staffUsers =
+            List.filterMap
+                (\id -> List.find (\user -> user.id == id) members)
+            <|
+                Dict.keys staffs.all
+                    ++ Dict.keys staffs.partially
+
+        reviewUsers =
+            List.filterMap
+                (\id -> List.find (\user -> user.id == id) members)
+            <|
+                Dict.keys reviewers.all
+                    ++ Dict.keys reviewers.partially
     in
     div
-        [ class "ui two column grid"
-        , style "position" "fixed"
-        , style "width" "calc(100% - 210px)"
-        , style "margin" "0"
-        , style "bottom" bottom
-        , style "transition" transition
+        [ class "ui six wide column grid card"
+
+        -- , style "position" "fixed"
+        -- , style "width" "calc(100% - 210px)"
+        -- , style "margin" "0"
+        -- , style "bottom" bottom
+        -- , style "transition" transition
         , onMouseDownStop None
         ]
-        [ div [ class "column" ]
-            [ div [ class "ui fluid card" ]
-                [ div [ class "content" ]
-                    [ div [ class "header" ] [ text "メンバー" ] ]
-                , div [ class "content" ]
-                    [ Html.p []
-                        [ text "担当："
-                        , User.selectionList
-                            members
-                            (Dict.keys staffs.all)
-                            (Dict.keys staffs.partially)
-                            |> Html.map (SetWorkStaffs selection)
-                        ]
-                    , Html.p []
-                        [ text "チェック："
-                        , User.selectionList
-                            members
-                            (Dict.keys reviewers.all)
-                            (Dict.keys reviewers.partially)
-                            |> Html.map (SetWorkReviewers selection)
-                        ]
+    <|
+        if List.isEmpty selection then
+            []
+
+        else
+            [ div [ class "content" ]
+                [ div [ class "header" ]
+                    [ case selection of
+                        [ work ] ->
+                            text work.name
+
+                        _ ->
+                            text <|
+                                String.fromInt (List.length selection)
+                                    ++ "件の作業"
+                    , div [ class "meta" ] []
+                    , div [ class "description" ] <|
+                        List.map Work.statusLabel status
                     ]
                 ]
-            ]
-        , div [ class "column" ]
-            [ div [ class "ui fluid card" ]
-                [ div [ class "content" ]
-                    [ div [ class "header" ] [ text "スケジュール" ] ]
+            , div [ class "content" ]
+                [ div [ class "header" ] [ text "メンバー" ]
+                , Html.p []
+                    [ text "担当："
+                    , User.list isAdmin
+                        members
+                        (Dict.keys staffs.all)
+                        (Dict.keys staffs.partially)
+                        |> Html.map (SetWorkStaffs selection)
+                    ]
+                , Html.p []
+                    [ text "チェック："
+                    , User.list isAdmin
+                        members
+                        (Dict.keys reviewers.all)
+                        (Dict.keys reviewers.partially)
+                        |> Html.map (SetWorkReviewers selection)
+                    ]
                 ]
+            , div [ class "content" ]
+                [ div [ class "header" ] [ text "スケジュール" ] ]
             ]
-        ]
 
 
 newPartButton project =

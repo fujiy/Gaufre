@@ -3,11 +3,12 @@ module Page exposing (..)
 import Browser
 import Data exposing (Auth, Data, project)
 import Data.Project exposing (Project)
+import Data.User as User
 import Firestore
 import Firestore.Access as Access exposing (Accessor)
 import Firestore.Lens as Lens exposing (o)
 import Firestore.Update as Update exposing (Updater)
-import Html exposing (Html, a, div, map, text)
+import Html exposing (Html, a, div, map, span, text)
 import Html.Attributes as Html exposing (class, href, style)
 import Maybe.Extra as Maybe
 import Page.Dashboard as Dashboard
@@ -228,6 +229,23 @@ sidemenu auth model data mproject =
                     [ icon "columns", text "Dashboard" ]
                 , a [ class "item", classIf pg.browse "active", link "" ]
                     [ icon "th", text "Overview" ]
+                , a
+                    [ class "item"
+                    , link "me"
+                    , style "position" "fixed"
+                    , style "bottom" "0"
+                    , style "width" "210px"
+                    ]
+                    [ User.avatar user
+                    , case mproject of
+                        Just project ->
+                            when (Data.isAdmin auth project) <|
+                                div [ class "ui basic label" ]
+                                    [ text "管理者" ]
+
+                        _ ->
+                            text ""
+                    ]
                 ]
 
 

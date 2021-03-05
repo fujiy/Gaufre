@@ -82,7 +82,7 @@ decodeFileMeta =
         |> required "name" string
         |> required "mimeType" string
         |> required "trashed" bool
-        |> required "parents" (Decode.list string)
+        |> optional "parents" (Decode.list string) []
         |> optional "webContentLink" string ""
         |> required "webViewLink" string
         |> required "iconLink" string
