@@ -6,10 +6,12 @@ import Data.Client as Client
 import Data.Project as Project exposing (Project)
 import Data.User as User exposing (User)
 import Firestore exposing (..)
+import Firestore.Access as Access exposing (Accessor)
 import Firestore.Desc as Desc exposing (FirestoreDesc)
-import Firestore.Lens as Lens exposing (QueryOp(..), o)
-import Firestore.Path as Path exposing (Id)
+import Firestore.Lens as Lens exposing (o, where_)
+import Firestore.Path as Path exposing (Id(..), unId)
 import Firestore.Update as Update exposing (Updater)
+import GDrive
 import Maybe.Extra as Maybe
 
 
@@ -27,9 +29,37 @@ type alias Data =
     }
 
 
-isAdmin : Auth -> Project -> Bool
-isAdmin auth p =
-    List.any (Firestore.getId >> (==) auth.uid) p.admins
+
+-- Utilities
+
+
+userRole : Project -> Id User -> Project.Role
+userRole p id =
+    if Firestore.getId p.owner == id then
+        Project.Owner
+
+    else if List.any (Firestore.getId >> (==) id) p.admins then
+        Project.Admin
+
+    else
+        Project.Staff
+
+
+myRole : Project -> Auth -> Project.Role
+myRole p auth =
+    userRole p <| Id auth.uid
+
+
+
+-- Desc
+
+
+desc : FirestoreDesc Data
+desc =
+    Desc.collection "users" .users User.desc
+        >> Desc.collection "clients" .clients Client.desc
+        >> Desc.collection "projects" .projects Project.desc
+        |> Desc.firestore Data
 
 
 
@@ -58,17 +88,27 @@ projects =
 
 myClient : Auth -> Lens Root Data Doc Client.Document
 myClient auth =
-    o clients <| Lens.doc auth.uid
+    o clients <| Lens.doc <| Id auth.uid
 
 
 me : Auth -> Lens Root Data Doc User.Document
 me auth =
-    o users <| Lens.doc auth.uid
+    o users <| Lens.doc <| Id auth.uid
 
 
-userRef : Id -> User.Reference
-userRef id =
+userHasEmail : String -> Lens Root Data Col User.Collection
+userHasEmail email =
+    o users <| Lens.where_ "email" Lens.EQ Desc.string email
+
+
+userRef : Id User -> User.Reference
+userRef (Id id) =
     Firestore.ref <| Path.fromIds [ "users", id ]
+
+
+myRef : Auth -> User.Reference
+myRef auth =
+    userRef <| Id auth.uid
 
 
 
@@ -78,17 +118,10 @@ userRef id =
 myProjects : Auth -> Lens Root Data Col Project.Collection
 myProjects auth =
     o projects <|
-        Lens.where_ "members" CONTAINS Desc.reference (userRef auth.uid)
-
-
-
--- myProjects : Auth -> Lens Root Data Doc (List Project.Document)
--- myProjects auth =
---     Lens.derefs projects Lens.end <|
---         o (myClient auth) <|
---             o Lens.get <|
---                 o Client.projects <|
---                     Lens.fromIso (Lens.reverse Lens.list2array)
+        Lens.where_ "members"
+            Lens.CONTAINS
+            Desc.reference
+            (userRef <| Id auth.uid)
 
 
 currentProject : Auth -> Int -> Lens Root Data Doc Project.Document
@@ -100,7 +133,7 @@ currentProject auth i =
                     Lens.atArray i
 
 
-project : Id -> Lens Root Data Doc Project.Document
+project : Id Project -> Lens Root Data Doc Project.Document
 project id =
     o projects <| Lens.doc id
 
@@ -118,18 +151,56 @@ projectMembers p =
         Lens.const p.members
 
 
-desc : FirestoreDesc Data
-desc =
-    Desc.collection "users" .users User.desc
-        >> Desc.collection "clients" .clients Client.desc
-        >> Desc.collection "projects" .projects Project.desc
-        |> Desc.firestore Data
+projectRef : Id Project -> Project.Reference
+projectRef (Id id) =
+    Firestore.ref <| Path.fromIds [ "projects", id ]
 
 
-initClient : Auth -> User -> Updater Data
+
+-- Updaters
+
+
+initClient : Auth -> User -> Updater Data msg
 initClient auth user =
     Update.all
         [ Update.default (me auth) User.desc user
         , Update.default (myClient auth) Client.desc <|
             { projects = Array.empty }
         ]
+
+
+inviteMember : Auth -> Id Project -> String -> Updater Data (Maybe User)
+inviteMember auth projectId name =
+    let
+        email =
+            name ++ "@gmail.com"
+    in
+    Update.andThen
+        (Access.access <|
+            (o users <|
+                o (where_ "email" Lens.EQ Desc.string email) Lens.getAll
+            )
+        )
+        (\us ->
+            case us of
+                [ user ] ->
+                    Update.all
+                        [ Update.modify (project projectId) Project.desc <|
+                            \p ->
+                                { p
+                                    | members =
+                                        userRef (Id user.id) :: p.members
+                                }
+                        , Update.command <|
+                            \_ ->
+                                GDrive.permissions_create auth.token
+                                    (unId projectId)
+                                    { role = GDrive.Writer
+                                    , type_ = GDrive.User user.email
+                                    }
+                                    |> Cmd.map (\_ -> Just user)
+                        ]
+
+                _ ->
+                    Update.succeed Nothing
+        )

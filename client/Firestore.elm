@@ -21,9 +21,9 @@ module Firestore exposing
     , watch
     )
 
-import Firestore.Desc as Desc exposing (Desc, FirestoreDesc(..))
+import Firestore.Desc as Desc exposing (FirestoreDesc(..))
 import Firestore.Internal as Internal exposing (..)
-import Firestore.Path as Path exposing (Path)
+import Firestore.Path as Path exposing (Id(..), Path)
 import Firestore.Path.Map as PathMap exposing (Paths)
 import Firestore.Path.Map.Slice as Slice
 import Firestore.Remote as Remote exposing (Remote(..))
@@ -32,28 +32,28 @@ import Json.Decode as Decode
 import Json.Encode as Encode exposing (Value)
 
 
-type Firestore r
+type Firestore r msg
     = Firestore
         { desc : FirestoreDesc r
         , data : r
-        , afterwards : Updater r
+        , afterwards : Updater r msg
         , listenings : Paths
         , errors : List Decode.Error
         }
 
 
-type FirestoreSub r
+type FirestoreSub r msg
     = FirestoreSub
         { desc : FirestoreDesc r
         , data : r
-        , afterwards : Updater r
+        , afterwards : Updater r msg
         , listenings : Paths
         , errors : List Decode.Error
         }
 
 
-type alias Id =
-    Path.Id
+type alias Id a =
+    Path.Id a
 
 
 type alias Collection s r =
@@ -105,12 +105,12 @@ ref =
     Reference
 
 
-getId : Reference s r -> Id
+getId : Reference s r -> Id r
 getId (Reference p) =
-    Path.getLast p |> Maybe.withDefault ""
+    Path.getLast p |> Maybe.withDefault "" |> Id
 
 
-init : FirestoreDesc r -> Firestore r
+init : FirestoreDesc r -> Firestore r msg
 init (FirestoreDesc d) =
     Firestore
         { desc = FirestoreDesc d
@@ -121,7 +121,10 @@ init (FirestoreDesc d) =
         }
 
 
-watch : SubPort (FirestoreSub r) -> Firestore r -> Sub (FirestoreSub r)
+watch :
+    SubPort (FirestoreSub r msg)
+    -> Firestore r msg
+    -> Sub (FirestoreSub r msg)
 watch p (Firestore fs) =
     p <|
         \v ->
@@ -148,22 +151,22 @@ watch p (Firestore fs) =
 apply :
     CmdPort msg
     -> (r -> Accessor r a)
-    -> FirestoreSub r
-    -> ( Firestore r, Maybe a, Cmd msg )
+    -> FirestoreSub r msg
+    -> ( Firestore r msg, Maybe a, Cmd msg )
 apply p use (FirestoreSub fs) =
-    update p fs.afterwards use (Firestore fs)
+    update p Update.none use (Firestore fs)
 
 
 update :
     CmdPort msg
-    -> Updater r
+    -> Updater r msg
     -> (r -> Accessor r a)
-    -> Firestore r
-    -> ( Firestore r, Maybe a, Cmd msg )
+    -> Firestore r msg
+    -> ( Firestore r msg, Maybe a, Cmd msg )
 update p updater use (Firestore fs) =
     let
         upds =
-            Update.runUpdater updater fs.data
+            Update.runUpdater (Update.both fs.afterwards updater) fs.data
 
         (Accessor reqs ra) =
             use upds.value
@@ -190,15 +193,18 @@ update p updater use (Firestore fs) =
             , afterwards = upds.afterwards
         }
     , Remote.toMaybe ra
-    , p <| encodeCommand <| Command listens unlistens updates
+    , Cmd.batch
+        [ p <| encodeCommand <| Command listens unlistens updates
+        , upds.command
+        ]
     )
 
 
 render :
     CmdPort msg
     -> (r -> Accessor r a)
-    -> Firestore r
-    -> ( Firestore r, Maybe a, Cmd msg )
+    -> Firestore r msg
+    -> ( Firestore r msg, Maybe a, Cmd msg )
 render p use =
     update p Update.none use
 

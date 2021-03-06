@@ -8,6 +8,7 @@ import Data exposing (Auth, Data)
 import Data.User exposing (User)
 import Firestore as Firestore exposing (Firestore)
 import Firestore.Access as Access exposing (Accessor)
+import Firestore.Update as Update
 import GDrive
 import Html exposing (..)
 import Page
@@ -48,7 +49,7 @@ type Model
     | SignedIn
         { auth : Data.Auth
         , page : Page.Model
-        , firestore : Firestore Data.Data
+        , firestore : Firestore Data.Data Msg
         , view : Document Msg
         , url : Url
         }
@@ -69,7 +70,7 @@ type Msg
     | SignIn
     | SignOut
     | Authorized Auth User
-    | Firestore (Firestore.FirestoreSub Data)
+    | Firestore (Firestore.FirestoreSub Data Msg)
     | Page Page.Msg
 
 
@@ -141,13 +142,13 @@ update msg model =
 
                         _ ->
                             let
-                                ( page, upd, cmd ) =
+                                ( page, upd ) =
                                     Page.update r.auth m r.page
 
-                                ( fs, mview, updcmd ) =
+                                ( fs, mview, cmd ) =
                                     Firestore.update
                                         firestoreCmdPort
-                                        upd
+                                        (Update.map Page upd)
                                         (pageView r.auth page)
                                         r.firestore
                             in
@@ -157,7 +158,7 @@ update msg model =
                                     , firestore = fs
                                     , view = Maybe.withDefault r.view mview
                                 }
-                            , Cmd.batch [ Cmd.map Page cmd, updcmd ]
+                            , cmd
                             )
 
                 LinkClicked urlRequest ->

@@ -3,7 +3,7 @@ module Firestore.Internal exposing (..)
 import Array exposing (Array)
 import Array.Extra as Array
 import Dict exposing (Dict)
-import Firestore.Path exposing (Id, Path)
+import Firestore.Path exposing (Id, Path, SomeId)
 import Firestore.Path.Map as PathMap
 import Firestore.Path.Map.Slice as Slice exposing (Slice)
 import Firestore.Remote exposing (Remote(..))
@@ -13,9 +13,9 @@ import List.Extra as List
 
 type Collection s r
     = Collection
-        { name : Id
+        { name : SomeId
         , empty : s
-        , docs : Dict Id (Document s r)
+        , docs : Dict SomeId (Document s r)
         , q : Dict QueryKey (Collection s r)
         }
 

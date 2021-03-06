@@ -27,9 +27,9 @@ type Msg
     = SignOut
 
 
-update : Auth -> Msg -> Model -> ( Model, Updater Data, Cmd Msg )
+update : Auth -> Msg -> Model -> ( Model, Updater Data Msg )
 update auth msg model =
-    ( model, Update.none, Cmd.none )
+    ( model, Update.none )
 
 
 view : Auth -> Model -> Data -> Project -> Accessor Data (Html Msg)

@@ -4,7 +4,7 @@ import Browser.Navigation as Nav
 import Bytes exposing (Bytes)
 import Data exposing (Auth, Data)
 import Data.Project as Project exposing (Project)
-import Data.User as User
+import Data.User as User exposing (User)
 import Data.Work as Work exposing (Work)
 import Dict exposing (Dict)
 import Dict.Extra as Dict
@@ -12,7 +12,7 @@ import File exposing (File)
 import Firestore exposing (Id)
 import Firestore.Access as Access exposing (Accessor)
 import Firestore.Lens as Lens exposing (o)
-import Firestore.Path as Path
+import Firestore.Path as Path exposing (Id(..), unId)
 import Firestore.Remote exposing (Remote(..))
 import Firestore.Update as Update exposing (Updater)
 import GDrive exposing (FileMeta)
@@ -29,10 +29,10 @@ import Util exposing (..)
 
 
 type alias Model =
-    { workId : Work.Id
+    { workId : Id Work
     , folderId : GDrive.Id
     , folder : Maybe FileMeta
-    , selection : Set Id
+    , selection : Set GDrive.Id
     , files : List FileMeta
     , folderCache : Dict GDrive.Id FileMeta
     , loading : Bool
@@ -51,7 +51,7 @@ type Modal
     | DownloadModal
 
 
-init : Work.Id -> GDrive.Id -> Model
+init : Id Work -> GDrive.Id -> Model
 init workId folderId =
     { workId = workId
     , folderId = folderId
@@ -75,8 +75,8 @@ type Msg
     | SelectFile FileMeta Bool Bool
     | ClearSelection
     | ModalState Modal
-    | SetWorkStaffs (List User.Id)
-    | SetWorkReviewers (List User.Id)
+    | SetWorkStaffs (List (Id User))
+    | SetWorkReviewers (List (Id User))
     | Rename String FileMeta
     | Delete (List FileMeta)
     | Upload (List ( String, File ))
@@ -87,11 +87,15 @@ type Msg
 
 initialize : Auth -> Model -> Cmd Msg
 initialize auth model =
-    if model.workId == model.folderId then
+    let
+        (Id id) =
+            model.workId
+    in
+    if id == model.folderId then
         Cmd.batch
-            [ GDrive.filesIn auth.token model.workId
+            [ GDrive.filesIn auth.token id
                 |> Cmd.map (Result.withDefault [] >> GotFiles False)
-            , GDrive.files_get auth.token model.workId
+            , GDrive.files_get auth.token id
                 |> Cmd.map
                     (Result.toMaybe >> Maybe.unwrap None GotFolder)
             ]
@@ -111,7 +115,7 @@ update :
     -> Msg
     -> { project : Int }
     -> Model
-    -> ( Model, Updater Data, Cmd Msg )
+    -> ( Model, Updater Data Msg )
 update auth msg m model =
     let
         projectLens =
@@ -146,7 +150,6 @@ update auth msg m model =
                 , loading = False
               }
             , Update.none
-            , Cmd.none
             )
 
         RemoveFile file ->
@@ -154,7 +157,6 @@ update auth msg m model =
                 | files = List.filter (.id >> (/=) file.id) model.files
               }
             , Update.none
-            , Cmd.none
             )
 
         GotFolder folder ->
@@ -163,18 +165,18 @@ update auth msg m model =
                 , folderCache = Dict.insert folder.id folder model.folderCache
               }
             , Update.none
-            , Cmd.none
             )
 
         MoveToFolder fileId ->
             ( model
-            , Update.none
-            , Nav.pushUrl auth.navKey <|
-                Url.relative
-                    []
-                    [ Url.string "work" model.workId
-                    , Url.string "folder" fileId
-                    ]
+            , Update.command <|
+                \_ ->
+                    Nav.pushUrl auth.navKey <|
+                        Url.relative
+                            []
+                            [ Url.string "work" <| unId <| model.workId
+                            , Url.string "folder" fileId
+                            ]
             )
 
         SelectFile file select clear ->
@@ -195,19 +197,16 @@ update auth msg m model =
                         )
               }
             , Update.none
-            , Cmd.none
             )
 
         ModalState modal ->
             ( { model | modal = modal }
             , Update.none
-            , Cmd.none
             )
 
         ClearSelection ->
             ( { model | selection = Set.empty }
             , Update.none
-            , Cmd.none
             )
 
         SetWorkStaffs users ->
@@ -216,7 +215,6 @@ update auth msg m model =
                 Work.desc
               <|
                 \work -> { work | staffs = userRefs users }
-            , Cmd.none
             )
 
         SetWorkReviewers users ->
@@ -225,28 +223,27 @@ update auth msg m model =
                 Work.desc
               <|
                 \work -> { work | reviewers = userRefs users }
-            , Cmd.none
             )
 
         Rename name file ->
             ( model
-            , Update.none
-            , GDrive.files_update auth.token
-                file.id
-                { gdriveUpdate | name = Just name }
-                |> Cmd.map
-                    (Result.unwrap None <|
-                        List.singleton
-                            >> GotFiles True
-                    )
+            , Update.command <|
+                \_ ->
+                    GDrive.files_update auth.token
+                        file.id
+                        { gdriveUpdate | name = Just name }
+                        |> Cmd.map
+                            (Result.unwrap None <|
+                                List.singleton
+                                    >> GotFiles True
+                            )
             )
 
         Delete files ->
             ( model
-            , Update.none
-            , Cmd.batch <|
+            , Update.batch <|
                 flip List.map files <|
-                    \file ->
+                    \file _ ->
                         GDrive.files_update auth.token
                             file.id
                             { gdriveUpdate | trashed = Just True }
@@ -255,18 +252,19 @@ update auth msg m model =
 
         CreateFolder name ->
             ( { model | modal = Hidden }
-            , Update.none
-            , case model.folder of
-                Nothing ->
-                    Cmd.none
+            , Update.command <|
+                \_ ->
+                    case model.folder of
+                        Nothing ->
+                            Cmd.none
 
-                Just parent ->
-                    GDrive.createFolder auth.token name [ parent.id ]
-                        |> Cmd.map
-                            (Result.unwrap None <|
-                                List.singleton
-                                    >> GotFiles True
-                            )
+                        Just parent ->
+                            GDrive.createFolder auth.token name [ parent.id ]
+                                |> Cmd.map
+                                    (Result.unwrap None <|
+                                        List.singleton
+                                            >> GotFiles True
+                                    )
             )
 
         Upload files ->
@@ -274,26 +272,26 @@ update auth msg m model =
                 | uploading =
                     not (List.isEmpty files) || model.uploading
               }
-            , Update.none
-            , case model.folder of
-                Nothing ->
-                    Cmd.none
+            , Update.command <|
+                \_ ->
+                    case model.folder of
+                        Nothing ->
+                            Cmd.none
 
-                Just parent ->
-                    GDrive.uploadFiles auth.token parent.id files
-                        |> Cmd.map (Result.mapError <| Debug.log "ERROR")
-                        |> Cmd.map
-                            (Result.unwrap None <|
-                                List.filterMap
-                                    (\( path, file ) ->
-                                        if path == "" then
-                                            Just file
+                        Just parent ->
+                            GDrive.uploadFiles auth.token parent.id files
+                                |> Cmd.map
+                                    (Result.unwrap None <|
+                                        List.filterMap
+                                            (\( path, file ) ->
+                                                if path == "" then
+                                                    Just file
 
-                                        else
-                                            Nothing
+                                                else
+                                                    Nothing
+                                            )
+                                            >> GotFiles True
                                     )
-                                    >> GotFiles True
-                            )
             )
 
         Download files ->
@@ -301,37 +299,39 @@ update auth msg m model =
                 | downloading =
                     not (List.isEmpty files) || model.downloading
               }
-            , Update.none
             , List.map
-                (\file ->
+                (\file _ ->
                     if GDrive.isFolder file then
                         GDrive.getZip auth.token file
                             |> Cmd.map
-                                (Result.unwrap None <| DownloadReady file)
+                                (Result.unwrap None <|
+                                    DownloadReady file
+                                )
 
                     else
                         GDrive.getData auth.token file
                             |> Cmd.map
-                                (Result.unwrap None <| DownloadReady file)
+                                (Result.unwrap None <|
+                                    DownloadReady file
+                                )
                 )
                 files
-                |> Cmd.batch
+                |> Update.batch
             )
 
         DownloadReady file bytes ->
             ( { model | downloading = False }
-            , Update.none
-            , GDrive.download file bytes
+            , Update.command <| \_ -> GDrive.download file bytes
             )
 
         _ ->
-            ( model, Update.none, Cmd.none )
+            ( model, Update.none )
 
 
-userRefs : List User.Id -> List User.Reference
+userRefs : List (Id User) -> List User.Reference
 userRefs =
     List.map <|
-        \id ->
+        \(Id id) ->
             Firestore.ref <|
                 Path.fromIds [ "users", id ]
 
@@ -340,7 +340,7 @@ view : Auth -> Model -> Data -> Project -> Accessor Data (Html Msg)
 view auth model data project =
     flip2 Access.map2
         (Access.access
-            (o (Data.project project.id) <|
+            (o (Data.project <| Id project.id) <|
                 o (Project.work model.workId) Lens.get
             )
             data
@@ -349,8 +349,10 @@ view auth model data project =
     <|
         \work members ->
             let
-                isAdmin =
-                    Data.isAdmin auth project
+                editable =
+                    Data.myRole project auth
+                        |> Project.authority
+                        |> .manageWorkStaffs
 
                 process =
                     Dict.get work.process project.processes
@@ -436,12 +438,12 @@ view auth model data project =
                             , div [ class "content" ]
                                 [ Html.p []
                                     [ text "担当："
-                                    , User.list isAdmin members staffs []
+                                    , User.list editable members staffs []
                                         |> Html.map SetWorkStaffs
                                     ]
                                 , Html.p []
                                     [ text "チェック："
-                                    , User.list isAdmin members reviewers []
+                                    , User.list editable members reviewers []
                                         |> Html.map SetWorkReviewers
                                     ]
                                 ]

@@ -1,13 +1,13 @@
 module Data.Project exposing (..)
 
 import Data.User as User
-import Data.Work as Work
+import Data.Work as Work exposing (Work)
 import Dict exposing (Dict)
 import Dict.Extra as Dict
 import Firestore exposing (..)
 import Firestore.Desc as Desc exposing (Desc, DocumentDesc)
 import Firestore.Lens as Lens exposing (lens, o)
-import Firestore.Path exposing (Id)
+import Firestore.Path exposing (Id(..), SomeId)
 import GDrive
 import Maybe.Extra as Maybe
 
@@ -18,9 +18,55 @@ type alias Project =
     , members : List User.Reference
     , admins : List User.Reference
     , owner : User.Reference
-    , processes : Dict ProcessId Process
-    , parts : Dict ProcessId Part
+    , processes : Dict SomeId Process
+    , parts : Dict SomeId Part
     }
+
+
+type Role
+    = Owner
+    | Admin
+    | Staff
+
+
+type alias Authority =
+    { manageMembers : Bool
+    , manageWorkStaffs : Bool
+    , editStructure : Bool
+    , deleteProject : Bool
+    }
+
+
+staffAuthority : Authority
+staffAuthority =
+    Authority False False False False
+
+
+adminAuthority : Authority
+adminAuthority =
+    { staffAuthority
+        | manageMembers = True
+        , manageWorkStaffs = True
+        , editStructure = True
+    }
+
+
+ownerAuthority : Authority
+ownerAuthority =
+    { adminAuthority | deleteProject = True }
+
+
+authority : Role -> Authority
+authority role =
+    case role of
+        Owner ->
+            ownerAuthority
+
+        Admin ->
+            adminAuthority
+
+        Staff ->
+            staffAuthority
 
 
 
@@ -68,7 +114,7 @@ works =
     Lens.subCollection .works (\b a -> { a | works = b })
 
 
-work : Id -> Lens Doc Document Doc Work.Document
+work : Id Work -> Lens Doc Document Doc Work.Document
 work id =
     o works <| Lens.doc id
 
@@ -94,7 +140,7 @@ makePartName i =
     "カット" ++ String.fromInt i
 
 
-newPart : Project -> ( PartId, Part )
+newPart : Project -> ( Id Part, Part )
 newPart p =
     let
         last =
@@ -115,7 +161,7 @@ newPart p =
                 try id (name + 1)
 
             else
-                ( String.fromInt id
+                ( Id <| String.fromInt id
                 , { name = makePartName name
                   , order = last + 1
                   , parent = Nothing
@@ -129,14 +175,10 @@ newPart p =
 -- Process
 
 
-type alias ProcessId =
-    Id
-
-
 type alias Process =
     { name : String
     , order : Float
-    , upstreams : List ProcessId
+    , upstreams : List SomeId
     }
 
 
@@ -170,14 +212,10 @@ defaultProcesses =
 -- Part
 
 
-type alias PartId =
-    Id
-
-
 type alias Part =
     { name : String
     , order : Float
-    , parent : Maybe PartId
+    , parent : Maybe SomeId
     }
 
 

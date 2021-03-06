@@ -6,24 +6,38 @@ import Json.Encode as Encode exposing (Value)
 import Maybe.Extra as Maybe
 
 
-type alias Id =
+type Id a
+    = Id String
+
+
+type alias SomeId =
     String
 
 
 type Path
     = Root
-    | RootCol Id Col
+    | RootCol SomeId Col
 
 
 type Col
     = Col
-    | SubDoc Id Doc
+    | SubDoc SomeId Doc
     | Query String String Value Col
 
 
 type Doc
     = Doc
-    | SubCol Id Col
+    | SubCol SomeId Col
+
+
+coerce : Id a -> Id b
+coerce (Id str) =
+    Id str
+
+
+unId : Id a -> String
+unId (Id str) =
+    str
 
 
 root : Path
@@ -36,12 +50,12 @@ isRoot =
     (==) Root
 
 
-topLevel : Id -> Path
+topLevel : SomeId -> Path
 topLevel id =
     RootCol id Col
 
 
-getLast : Path -> Maybe Id
+getLast : Path -> Maybe SomeId
 getLast p =
     let
         goCol col =
@@ -71,7 +85,7 @@ getLast p =
             Maybe.or (goCol col) (Just id)
 
 
-fromIds : List Id -> Path
+fromIds : List SomeId -> Path
 fromIds xs =
     let
         goCol ids =

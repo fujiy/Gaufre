@@ -5,7 +5,7 @@ import Dict
 import Firestore.Access as Access
 import Firestore.Desc exposing (Desc)
 import Firestore.Internal exposing (..)
-import Firestore.Path as Path exposing (Id, Path)
+import Firestore.Path as Path exposing (Id(..), Path)
 import Firestore.Path.Map as PathMap
 import Firestore.Path.Map.Slice as Slice
 import Firestore.Remote as Remote exposing (Remote(..))
@@ -224,8 +224,8 @@ subCollection getter setter =
         }
 
 
-doc : Id -> Lens Col (Collection s r) Doc (Document s r)
-doc id =
+doc : Id r -> Lens Col (Collection s r) Doc (Document s r)
+doc (Id id) =
     Lens
         { access =
             \(Collection col) ->
@@ -347,9 +347,16 @@ getAllRemote =
         { access =
             \(Collection col) ->
                 Accessor Slice.colItem
-                    (Dict.values col.docs
-                        |> List.map (\(Document _ r) -> r)
-                        |> UpToDate
+                    (let
+                        rs =
+                            Dict.values col.docs
+                                |> List.map (\(Document _ r) -> r)
+                     in
+                     if List.isEmpty rs then
+                        Loading
+
+                     else
+                        UpToDate rs
                     )
         , update =
             \_ _ ->
@@ -368,9 +375,17 @@ getAll =
         { access =
             \(Collection col) ->
                 Accessor Slice.colItem
-                    (Dict.values col.docs
-                        |> List.filterMap (\(Document _ r) -> Remote.toMaybe r)
-                        |> UpToDate
+                    (let
+                        rs =
+                            Dict.values col.docs
+                                |> List.filterMap
+                                    (\(Document _ r) -> Remote.toMaybe r)
+                     in
+                     if List.isEmpty rs then
+                        Loading
+
+                     else
+                        UpToDate rs
                     )
         , update =
             \_ _ ->
@@ -420,19 +435,29 @@ getRemote =
 
 
 -- Reference
-
-
-ref : Lens Root a Doc (Document s r) -> a -> Reference s r
-ref (Lens l) a =
-    let
-        (Accessor s _) =
-            l.access a
-    in
-    Slice.toMapDoc mergeRequest Get s
-        |> PathMap.toList
-        |> List.head
-        |> Maybe.unwrap Path.root Tuple.first
-        |> Reference
+-- ref : Lens Root a Doc (Document s r) -> Lens Root a Item (Reference s r)
+-- ref (Lens l) =
+--     Lens
+--         { access =
+--             \a ->
+--                 let
+--                     (Accessor s _) =
+--                         l.access a
+--                 in
+--                 Slice.toMapDoc mergeRequest Get s
+--                     |> PathMap.toList
+--                     |> List.head
+--                     |> Maybe.unwrap Path.root Tuple.first
+--                     |> Reference
+--         , update =
+--             \_ _ ->
+--                 Updater <|
+--                     \a ->
+--                         { value = a
+--                         , requests = Slice.just
+--                         , afterwards = noUpdater
+--                         }
+--         }
 
 
 type Dereferer d a
@@ -452,7 +477,7 @@ sub superLens (Dereferer f) =
         \docPath ->
             case docPath of
                 Path.SubCol _ (Path.SubDoc id subPath) ->
-                    o superLens <| o (doc id) <| f subPath
+                    o superLens <| o (doc <| Id id) <| f subPath
 
                 _ ->
                     failDoc docPath
@@ -467,7 +492,7 @@ root superLens (Dereferer f) =
         \path ->
             case path of
                 Path.RootCol _ (Path.SubDoc id subPath) ->
-                    o superLens <| o (doc id) <| f subPath
+                    o superLens <| o (doc <| Id id) <| f subPath
 
                 _ ->
                     fail

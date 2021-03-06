@@ -55,12 +55,11 @@ service cloud.firestore {
     }
 
     match /projects/{projectId} {
-      allow get, read, update:    if isAuth();
-      // allow read:   if isMemberOfIt();
-      // allow update: if isAdminOfIt();
-      // && request.resource.data.owner == resource.data.owner;
+      allow read:   if isAuth();
+      allow create: if user() == request.resource.data.owner;
+      allow update: if isAdminOfIt()
+                    && request.resource.data.owner == resource.data.owner;
       allow delete: if isOwnerOfIt();
-      allow create: if user() == request.resource.data.owner
     }
     match /projects/{projectId}/works/{workId} {
       allow get, list:      if isMemberOf(projectId);

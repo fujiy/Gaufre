@@ -2,16 +2,18 @@ module Page exposing (..)
 
 import Browser
 import Data exposing (Auth, Data, project)
-import Data.Project exposing (Project)
+import Data.Project as Project exposing (Project)
 import Data.User as User
 import Firestore
 import Firestore.Access as Access exposing (Accessor)
 import Firestore.Lens as Lens exposing (o)
+import Firestore.Path exposing (Id(..))
 import Firestore.Update as Update exposing (Updater)
-import Html exposing (Html, a, div, map, span, text)
+import Html exposing (Html, a, div, map, text)
 import Html.Attributes as Html exposing (class, href, style)
 import Maybe.Extra as Maybe
 import Page.Dashboard as Dashboard
+import Page.Members as Members
 import Page.Overview as Overview
 import Page.Projects as Projects
 import Page.Work as Work
@@ -33,6 +35,7 @@ type Page
     | Dashboard Dashboard.Model
     | Overview Overview.Model
     | Work Work.Model
+    | Members Members.Model
 
 
 type Msg
@@ -40,6 +43,7 @@ type Msg
     | DashboardMsg Dashboard.Msg
     | OverviewMsg Overview.Msg
     | WorkMsg Work.Msg
+    | MembersMsg (Id Project) Members.Msg
     | SignOut
 
 
@@ -65,7 +69,7 @@ urlChanged model url =
                                 Maybe.map
                                     (\workId ->
                                         Work <|
-                                            Work.init workId <|
+                                            Work.init (Id workId) <|
                                                 Maybe.withDefault workId mf
                                     )
                                     mw
@@ -78,6 +82,7 @@ urlChanged model url =
                                 <?> Q.string "folder"
                             )
                         , Url.map (Overview Overview.init) Url.top
+                        , Url.map (Members Members.init) <| Url.s "members"
                         ]
         ]
         |> flip Url.parse url
@@ -95,41 +100,47 @@ initialize auth model =
             Cmd.none
 
 
-update : Auth -> Msg -> Model -> ( Model, Updater Data, Cmd Msg )
+update : Auth -> Msg -> Model -> ( Model, Updater Data Msg )
 update auth message model =
     case ( message, model.page ) of
         ( ProjectsMsg msg, Projects m ) ->
             let
-                ( m_, upd, cmd ) =
+                ( m_, upd ) =
                     Projects.update auth msg m
             in
             ( { model | page = Projects m_ }
-            , upd
-            , Cmd.map ProjectsMsg cmd
+            , Update.map ProjectsMsg upd
             )
 
         ( OverviewMsg msg, Overview m ) ->
             let
-                ( m_, upd, cmd ) =
+                ( m_, upd ) =
                     Overview.update auth msg { project = model.project } m
             in
             ( { model | page = Overview m_ }
-            , upd
-            , Cmd.map OverviewMsg cmd
+            , Update.map OverviewMsg upd
             )
 
         ( WorkMsg msg, Work m ) ->
             let
-                ( m_, upd, cmd ) =
+                ( m_, upd ) =
                     Work.update auth msg { project = model.project } m
             in
             ( { model | page = Work m_ }
-            , upd
-            , Cmd.map WorkMsg cmd
+            , Update.map WorkMsg upd
+            )
+
+        ( MembersMsg projectId msg, Members m ) ->
+            let
+                ( m_, upd ) =
+                    Members.update auth msg projectId m
+            in
+            ( { model | page = Members m_ }
+            , Update.map (MembersMsg projectId) upd
             )
 
         _ ->
-            ( model, Update.none, Cmd.none )
+            ( model, Update.none )
 
 
 view : Auth -> Model -> Data -> Accessor Data (Browser.Document Msg)
@@ -176,6 +187,15 @@ view auth model data =
                             |> Access.andThen
                                 (Work.view auth m data)
                             |> Access.map (map WorkMsg)
+
+                    Members m ->
+                        Access.fromJust project
+                            |> Access.andThen
+                                (\p ->
+                                    Members.view auth m data p
+                                        |> Access.map
+                                            (map <| MembersMsg <| Id p.id)
+                                )
             ]
 
 
@@ -186,6 +206,7 @@ sidemenu auth model data mproject =
             { projects = False
             , dashboard = False
             , browse = False
+            , members = False
             }
 
         pg =
@@ -202,6 +223,9 @@ sidemenu auth model data mproject =
                 Work _ ->
                     { pg_ | browse = True }
 
+                Members _ ->
+                    { pg_ | members = True }
+
         link p =
             href <| Url.Builder.absolute [ String.fromInt model.project, p ] []
     in
@@ -216,19 +240,25 @@ sidemenu auth model data mproject =
                     , href "/"
                     ]
                     [ if pg.projects then
-                        text "Projects"
+                        text "全てのプロジェクト"
 
                       else
-                        text <| Maybe.unwrap "No Project" .name mproject
+                        text <| Maybe.unwrap "プロジェクトなし" .name mproject
                     ]
                 , a
                     [ class "item"
                     , classIf pg.dashboard "active"
                     , link "dashboard"
                     ]
-                    [ icon "columns", text "Dashboard" ]
+                    [ icon "columns", text "ダッシュボード" ]
                 , a [ class "item", classIf pg.browse "active", link "" ]
-                    [ icon "th", text "Overview" ]
+                    [ icon "th", text "ビュー" ]
+                , a
+                    [ class "item"
+                    , classIf pg.members "active"
+                    , link "members"
+                    ]
+                    [ icon "users", text "メンバー" ]
                 , a
                     [ class "item"
                     , link "me"
@@ -239,9 +269,17 @@ sidemenu auth model data mproject =
                     [ User.avatar user
                     , case mproject of
                         Just project ->
-                            when (Data.isAdmin auth project) <|
-                                div [ class "ui basic label" ]
-                                    [ text "管理者" ]
+                            case Data.myRole project auth of
+                                Project.Owner ->
+                                    div [ class "ui basic label" ]
+                                        [ text "管理者" ]
+
+                                Project.Admin ->
+                                    div [ class "ui basic label" ]
+                                        [ text "管理者" ]
+
+                                _ ->
+                                    text ""
 
                         _ ->
                             text ""

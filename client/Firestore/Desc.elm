@@ -3,7 +3,7 @@ module Firestore.Desc exposing (..)
 import Array exposing (Array)
 import Dict exposing (Dict)
 import Firestore.Internal exposing (..)
-import Firestore.Path as Path exposing (Id, Path)
+import Firestore.Path as Path exposing (Id(..), Path, SomeId)
 import Firestore.Path.Map as PathMap exposing (Paths)
 import Firestore.Remote as Remote exposing (Remote(..))
 import Json.Decode as Decode exposing (Decoder)
@@ -54,7 +54,7 @@ type FirestoreDesc r
 
 type CollectionDesc l r
     = CollectionDesc
-        { applier : Applier_ (Dict Id (PathMap.Col Value)) l r
+        { applier : Applier_ (Dict SomeId (PathMap.Col Value)) l r
         , empty : l
         }
 
@@ -95,7 +95,7 @@ document constr =
 
 
 documentWithId :
-    (Id -> c)
+    (SomeId -> c)
     -> (Field c r -> Field r r)
     -> DocumentDesc () r
 documentWithId constr f =
@@ -113,7 +113,7 @@ documentWithSubs constr =
 
 
 documentWithIdAndSubs :
-    (Id -> rc)
+    (SomeId -> rc)
     -> (Field rc r -> Field r r)
     -> sc
     -> (CollectionDesc sc s -> CollectionDesc s s)
@@ -127,12 +127,12 @@ documentWithIdAndSubs rconstr rf sconstr sf =
                     , empty = sconstr
                     }
 
-        fld id =
+        fld did =
             unField <|
                 rf <|
                     Field
                         { encoders = []
-                        , decoder = Decode.succeed <| rconstr id
+                        , decoder = Decode.succeed <| rconstr did
                         }
     in
     DocumentDesc
@@ -144,7 +144,7 @@ documentWithIdAndSubs rconstr rf sconstr sf =
                             (fld "").encoders
         , decoder =
             Decode.andThen
-                (\id -> Remote.decode (fld id).decoder)
+                (\did -> Remote.decode (fld did).decoder)
                 (Decode.field "id" Decode.string)
         , applier =
             \(PathMap.Doc ma d) ->
@@ -192,10 +192,10 @@ collection name getter (DocumentDesc d) (CollectionDesc c) =
                     Collection { col | docs = docs, q = q }
                 )
                 (List.foldr
-                    (\( id, dpv ) rd ->
+                    (\( did, dpv ) rd ->
                         let
                             (Document sub doc) =
-                                Dict.get id col.docs
+                                Dict.get did col.docs
                                     |> Maybe.withDefault
                                         (Document d.empty Loading)
 
@@ -208,7 +208,7 @@ collection name getter (DocumentDesc d) (CollectionDesc c) =
                                         (Decode.decodeValue d.decoder)
                         in
                         Result.map2
-                            (Dict.insert id)
+                            (Dict.insert did)
                             (Result.map2 Document sub_ doc_)
                             rd
                     )
@@ -264,6 +264,11 @@ reference =
 remote : Desc a -> Desc (Remote a)
 remote d =
     Desc (Remote.encode d.encoder) (Remote.decode d.decoder)
+
+
+id : Desc (Id a)
+id =
+    map (Iso Id (\(Id s) -> s)) string
 
 
 pathMap : Desc a -> Desc (PathMap.Map a)

@@ -2,7 +2,7 @@ module Page.Overview exposing (..)
 
 import Browser.Navigation as Nav
 import Data exposing (Auth, Data)
-import Data.Project as Project exposing (Part, PartId, Process, ProcessId, Project, newPart, work)
+import Data.Project as Project exposing (Part, Process, Project, newPart, work)
 import Data.User as User exposing (User)
 import Data.Work as Work exposing (Work)
 import Dict exposing (Dict)
@@ -10,11 +10,11 @@ import Dict.Extra as Dict
 import Firestore exposing (Id)
 import Firestore.Access as Access exposing (Accessor)
 import Firestore.Lens as Lens exposing (o)
-import Firestore.Path as Path
+import Firestore.Path as Path exposing (Id(..), SomeId, unId)
 import Firestore.Remote exposing (Remote(..))
 import Firestore.Update as Update exposing (Updater)
 import GDrive exposing (FileMeta)
-import Html exposing (Html, div, span, table, tbody, td, text, th, thead, tr)
+import Html exposing (Html, div, table, tbody, td, text, th, thead, tr)
 import Html.Attributes exposing (class, style)
 import Html.Events exposing (onDoubleClick)
 import List.Extra as List
@@ -27,7 +27,7 @@ import View.Button as Button
 
 
 type alias Model =
-    { selection : Set Id }
+    { selection : Set SomeId }
 
 
 init : Model
@@ -38,12 +38,12 @@ init =
 type Msg
     = None
     | MoveToWork Process Part Work
-    | SelectWork Work.Id Bool Bool
+    | SelectWork (Id Work) Bool Bool
     | ClearSelection
-    | AddPart (List ProcessId) PartId Part
-    | CreatedWorkFolder ProcessId PartId FileMeta
-    | SetWorkStaffs (List Work) (List User.Id)
-    | SetWorkReviewers (List Work) (List User.Id)
+    | AddPart (List (Id Process)) (Id Part) Part
+    | CreatedWorkFolder (Id Process) (Id Part) FileMeta
+    | SetWorkStaffs (List Work) (List (Id User))
+    | SetWorkReviewers (List Work) (List (Id User))
 
 
 update :
@@ -51,7 +51,7 @@ update :
     -> Msg
     -> { project : Int }
     -> Model
-    -> ( Model, Updater Data, Cmd Msg )
+    -> ( Model, Updater Data Msg )
 update auth msg m model =
     let
         projectLens =
@@ -60,14 +60,15 @@ update auth msg m model =
     case msg of
         MoveToWork process part work ->
             ( model
-            , Update.none
-            , Nav.pushUrl auth.navKey <|
-                Url.absolute
-                    [ String.fromInt m.project, process.name, part.name ]
-                    [ Url.string "work" work.id ]
+            , Update.command <|
+                \_ ->
+                    Nav.pushUrl auth.navKey <|
+                        Url.absolute
+                            [ String.fromInt m.project, process.name, part.name ]
+                            [ Url.string "work" work.id ]
             )
 
-        SelectWork workId select clear ->
+        SelectWork (Id workId) select clear ->
             ( { model
                 | selection =
                     (if select then
@@ -85,40 +86,43 @@ update auth msg m model =
                         )
               }
             , Update.none
-            , Cmd.none
             )
 
         ClearSelection ->
             ( { model | selection = Set.empty }
             , Update.none
-            , Cmd.none
             )
 
-        AddPart processes newId newPart ->
+        AddPart processes (Id newId) newPart ->
             ( model
-            , Update.modify projectLens Project.desc <|
-                \p -> { p | parts = Dict.insert newId newPart p.parts }
-            , List.map
-                (\processId ->
-                    GDrive.createFolder auth.token
-                        newPart.name
-                        [ processId ]
-                        |> Cmd.map
-                            (Result.map (CreatedWorkFolder processId newId)
-                                >> Result.withDefault None
-                            )
-                )
-                processes
-                |> Cmd.batch
+            , Update.all
+                [ Update.modify projectLens Project.desc <|
+                    \p -> { p | parts = Dict.insert newId newPart p.parts }
+                , List.map
+                    (\(Id processId) _ ->
+                        GDrive.createFolder auth.token
+                            newPart.name
+                            [ processId ]
+                            |> Cmd.map
+                                (Result.map
+                                    (CreatedWorkFolder
+                                        (Id processId)
+                                        (Id newId)
+                                    )
+                                    >> Result.withDefault None
+                                )
+                    )
+                    processes
+                    |> Update.batch
+                ]
             )
 
         CreatedWorkFolder processId partId folder ->
             ( model
             , Update.set
-                (o projectLens <| Project.work folder.id)
+                (o projectLens <| Project.work <| Id folder.id)
                 Work.desc
-                (Work.init folder.id folder.name processId partId)
-            , Cmd.none
+                (Work.init (Id folder.id) folder.name processId partId)
             )
 
         SetWorkStaffs works users ->
@@ -126,11 +130,10 @@ update auth msg m model =
             , Update.all <|
                 flip List.map works <|
                     \w ->
-                        Update.modify (o projectLens <| Project.work w.id)
+                        Update.modify (o projectLens <| Project.work <| Id w.id)
                             Work.desc
                         <|
                             \work -> { work | staffs = userRefs users }
-            , Cmd.none
             )
 
         SetWorkReviewers works users ->
@@ -138,21 +141,20 @@ update auth msg m model =
             , Update.all <|
                 flip List.map works <|
                     \w ->
-                        Update.modify (o projectLens <| Project.work w.id)
+                        Update.modify (o projectLens <| Project.work <| Id w.id)
                             Work.desc
                         <|
                             \work -> { work | reviewers = userRefs users }
-            , Cmd.none
             )
 
         None ->
-            ( model, Update.none, Cmd.none )
+            ( model, Update.none )
 
 
-userRefs : List User.Id -> List User.Reference
+userRefs : List (Id User) -> List User.Reference
 userRefs =
     List.map <|
-        \id ->
+        \(Id id) ->
             Firestore.ref <|
                 Path.fromIds [ "users", id ]
 
@@ -163,20 +165,25 @@ view auth model data project =
         processes =
             Dict.toList project.processes
                 |> List.sortBy (\( _, p ) -> p.order)
+                |> List.map (Tuple.mapFirst Id)
 
         parts =
             Dict.toList project.parts
                 |> List.sortBy (\( _, p ) -> p.order)
+                |> List.map (Tuple.mapFirst Id)
     in
     flip2 Access.map2
         (Access.access
-            (o (Data.project project.id) <| o Project.works Lens.getAll)
+            (o (Data.project <| Id project.id) <| o Project.works Lens.getAll)
             data
         )
         (Access.access (o (Data.projectMembers project) Lens.gets) data)
     <|
         \works_ members ->
             let
+                role =
+                    Data.myRole project auth
+
                 works =
                     List.concatMap
                         (\work ->
@@ -211,23 +218,23 @@ view auth model data project =
                     [ thead [] [ tableHeader model processes ]
                     , tbody [] <|
                         List.map (tableRow model processes works) parts
-                            ++ (if Data.isAdmin auth project then
+                            ++ (if Project.authority role |> .editStructure then
                                     [ newPartButton project ]
 
                                 else
                                     []
                                )
                     ]
-                , actions (Data.isAdmin auth project) members selection
+                , actions role members selection
                 ]
 
 
-tableHeader : Model -> List ( ProcessId, Process ) -> Html Msg
+tableHeader : Model -> List ( Id Process, Process ) -> Html Msg
 tableHeader model processes =
     tr [] <|
         th [] []
             :: List.map
-                (\( id, process ) ->
+                (\( Id id, process ) ->
                     let
                         selected =
                             Set.member id model.selection
@@ -235,8 +242,10 @@ tableHeader model processes =
                     th
                         [ class "selectable"
                         , classIf selected "active"
-                        , onMouseDownStop <| SelectWork id (not selected) True
-                        , onDragEnter <| SelectWork id (not selected) False
+                        , onMouseDownStop <|
+                            SelectWork (Id id) (not selected) True
+                        , onDragEnter <|
+                            SelectWork (Id id) (not selected) False
                         ]
                         [ text process.name ]
                 )
@@ -245,11 +254,11 @@ tableHeader model processes =
 
 tableRow :
     Model
-    -> List ( ProcessId, Process )
-    -> Dict ProcessId (Dict PartId Work)
-    -> ( PartId, Part )
+    -> List ( Id Process, Process )
+    -> Dict SomeId (Dict SomeId Work)
+    -> ( Id Part, Part )
     -> Html Msg
-tableRow model processes works ( partId, part ) =
+tableRow model processes works ( Id partId, part ) =
     let
         selected =
             Set.member partId model.selection
@@ -259,12 +268,12 @@ tableRow model processes works ( partId, part ) =
             [ class "selectable right aligned"
             , classIf selected "active"
             , style "padding" "5px"
-            , onMouseDownStop <| SelectWork partId (not selected) True
-            , onDragEnter <| SelectWork partId (not selected) False
+            , onMouseDownStop <| SelectWork (Id partId) (not selected) True
+            , onDragEnter <| SelectWork (Id partId) (not selected) False
             ]
             [ text part.name ]
             :: List.map
-                (\( processId, process ) ->
+                (\( Id processId, process ) ->
                     Dict.get processId works
                         |> Maybe.andThen (Dict.get partId)
                         |> Maybe.unwrap emptyCell (workCell model process part)
@@ -291,40 +300,28 @@ workCell model process part work =
     td
         [ class "selectable center aligned"
         , classIf selected "active"
-        , onMouseDownStop <| SelectWork work.id (not selectedOnly) True
-        , onDragEnter <| SelectWork work.id (not selected) False
+        , onMouseDownStop <| SelectWork (Id work.id) (not selectedOnly) True
+        , onDragEnter <| SelectWork (Id work.id) (not selected) False
         , onDoubleClick <| MoveToWork process part work
         ]
         [ icon <| Work.iconClass <| Work.getStatus work ]
 
 
-actions : Bool -> List User -> List Work -> Html Msg
-actions isAdmin members selection =
+actions : Project.Role -> List User -> List Work -> Html Msg
+actions role members selection =
     let
         staffs =
-            gatherList (.staffs >> List.map Firestore.getId) selection
+            gatherList (.staffs >> List.map (Firestore.getId >> unId))
+                selection
 
         reviewers =
-            gatherList (.reviewers >> List.map Firestore.getId) selection
+            gatherList (.reviewers >> List.map (Firestore.getId >> unId))
+                selection
 
         status =
             List.map Work.getStatus selection
                 |> List.sortBy Work.statusNumber
                 |> List.uniqueBy Work.statusNumber
-
-        staffUsers =
-            List.filterMap
-                (\id -> List.find (\user -> user.id == id) members)
-            <|
-                Dict.keys staffs.all
-                    ++ Dict.keys staffs.partially
-
-        reviewUsers =
-            List.filterMap
-                (\id -> List.find (\user -> user.id == id) members)
-            <|
-                Dict.keys reviewers.all
-                    ++ Dict.keys reviewers.partially
     in
     div
         [ class "ui six wide column grid card"
@@ -360,18 +357,18 @@ actions isAdmin members selection =
                 [ div [ class "header" ] [ text "メンバー" ]
                 , Html.p []
                     [ text "担当："
-                    , User.list isAdmin
+                    , User.list (Project.authority role |> .manageWorkStaffs)
                         members
-                        (Dict.keys staffs.all)
-                        (Dict.keys staffs.partially)
+                        (Dict.keys staffs.all |> List.map Id)
+                        (Dict.keys staffs.partially |> List.map Id)
                         |> Html.map (SetWorkStaffs selection)
                     ]
                 , Html.p []
                     [ text "チェック："
-                    , User.list isAdmin
+                    , User.list (Project.authority role |> .manageWorkStaffs)
                         members
-                        (Dict.keys reviewers.all)
-                        (Dict.keys reviewers.partially)
+                        (Dict.keys reviewers.all |> List.map Id)
+                        (Dict.keys reviewers.partially |> List.map Id)
                         |> Html.map (SetWorkReviewers selection)
                     ]
                 ]
@@ -389,14 +386,14 @@ newPartButton project =
         [ td []
             [ Button.add <|
                 AddPart
-                    (Dict.keys project.processes)
+                    (Dict.keys project.processes |> List.map Id)
                     newId
                     newPart
             ]
         ]
 
 
-isSelected : Set Id -> Work -> Bool
+isSelected : Set SomeId -> Work -> Bool
 isSelected selection work =
     Set.member work.id selection
         || Set.member work.process selection
@@ -404,11 +401,11 @@ isSelected selection work =
 
 
 gatherList :
-    (Work -> List comparable)
-    -> List Work
+    (a -> List comparable)
+    -> List a
     ->
-        { all : Dict comparable (List Work)
-        , partially : Dict comparable (List Work)
+        { all : Dict comparable (List a)
+        , partially : Dict comparable (List a)
         }
 gatherList getter =
     List.foldr

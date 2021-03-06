@@ -2,7 +2,7 @@ module Firestore.Path.Map exposing (..)
 
 import Dict exposing (Dict)
 import Dict.Extra as Dict
-import Firestore.Path as Path exposing (Id, Path)
+import Firestore.Path as Path exposing (Path, SomeId)
 import Json.Decode as Decode exposing (Decoder)
 import Json.Encode as Encode exposing (Value)
 import Maybe.Extra as Maybe
@@ -14,15 +14,15 @@ type alias Paths =
 
 
 type Map a
-    = Root (Dict Id (Col a))
+    = Root (Dict SomeId (Col a))
 
 
 type Col a
-    = Col (Maybe a) (Dict Id (Doc a)) (Dict Query (Col a))
+    = Col (Maybe a) (Dict SomeId (Doc a)) (Dict Query (Col a))
 
 
 type Doc a
-    = Doc (Maybe a) (Dict Id (Col a))
+    = Doc (Maybe a) (Dict SomeId (Col a))
 
 
 type alias Query =
@@ -125,17 +125,17 @@ isEmptyDoc (Doc ma d) =
         && (Dict.isEmpty d || not (Dict.any (\_ -> isEmptyCol >> not) d))
 
 
-at : Id -> Map a -> Col a
+at : SomeId -> Map a -> Col a
 at id (Root d) =
     Dict.get id d |> Maybe.withDefault emptyCol
 
 
-subs : Map a -> Dict Id (Col a)
+subs : Map a -> Dict SomeId (Col a)
 subs (Root d) =
     d
 
 
-subCols : Doc a -> Dict Id (Col a)
+subCols : Doc a -> Dict SomeId (Col a)
 subCols (Doc _ d) =
     d
 
@@ -156,7 +156,7 @@ subQueries (Col _ _ q) =
             )
 
 
-subDocs : Col a -> Dict Id (Doc a)
+subDocs : Col a -> Dict SomeId (Doc a)
 subDocs (Col _ d _) =
     d
 
@@ -273,7 +273,7 @@ mapDoc f (Doc m d) =
     Doc (Maybe.map f m) (Dict.map (\_ -> mapCol f) d)
 
 
-sub : Id -> Col a -> Map a
+sub : SomeId -> Col a -> Map a
 sub id col =
     Root <| Dict.singleton id col
 
@@ -558,7 +558,7 @@ encode enc (Root d) =
     Encode.list (encodeCol enc) <| Dict.toList d
 
 
-encodeCol : (a -> Value) -> ( Id, Col a ) -> Value
+encodeCol : (a -> Value) -> ( SomeId, Col a ) -> Value
 encodeCol enc ( id, Col ma d q ) =
     Encode.object
         [ ( "id", Encode.string id )
@@ -583,7 +583,7 @@ encodeQuery enc ( ( field, op, value ), Col ma d q ) =
         ]
 
 
-encodeDoc : (a -> Value) -> ( Id, Doc a ) -> Value
+encodeDoc : (a -> Value) -> ( SomeId, Doc a ) -> Value
 encodeDoc enc ( id, Doc ma d ) =
     Encode.object
         [ ( "id", Encode.string id )
@@ -597,7 +597,7 @@ decode dec =
     Decode.list (decodeCol dec) |> Decode.map (Dict.fromList >> Root)
 
 
-decodeCol : Decoder a -> Decoder ( Id, Col a )
+decodeCol : Decoder a -> Decoder ( SomeId, Col a )
 decodeCol dec =
     Decode.lazy <|
         \_ ->
@@ -644,7 +644,7 @@ decodeQuery dec =
                     )
 
 
-decodeDoc : Decoder a -> Decoder ( Id, Doc a )
+decodeDoc : Decoder a -> Decoder ( SomeId, Doc a )
 decodeDoc dec =
     Decode.map2 Tuple.pair
         (Decode.field "id" Decode.string)

@@ -3,21 +3,10 @@ module Data.Work exposing (..)
 import Data.User as User exposing (User)
 import Firestore exposing (..)
 import Firestore.Desc as Desc exposing (DocumentDesc)
+import Firestore.Path exposing (Id(..), SomeId)
 import Html exposing (Html, div, text)
 import Html.Attributes exposing (class)
 import Util exposing (icon)
-
-
-type alias Id =
-    String
-
-
-type alias ProcessId =
-    String
-
-
-type alias PartId =
-    String
 
 
 type Status
@@ -29,10 +18,10 @@ type Status
 
 
 type alias Work =
-    { id : Id
+    { id : SomeId
     , name : String
-    , process : ProcessId
-    , belongsTo : List PartId
+    , process : SomeId
+    , belongsTo : List SomeId
     , staffs : List User.Reference
     , reviewers : List User.Reference
     }
@@ -50,8 +39,8 @@ type alias Document =
     Firestore.Document () Work
 
 
-init : Id -> String -> ProcessId -> PartId -> Work
-init id name process part =
+init : Id Work -> String -> Id x -> Id y -> Work
+init (Id id) name (Id process) (Id part) =
     { id = id
     , name = name
     , process = process

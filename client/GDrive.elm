@@ -27,6 +27,14 @@ type alias Id =
     String
 
 
+type alias Cache =
+    { files : Dict Id FileMeta }
+
+
+
+-- File
+
+
 type alias FileMeta =
     { id : Id
     , name : String
@@ -44,8 +52,8 @@ type alias FileMeta =
     }
 
 
-fields : List String
-fields =
+fileMetaFields : List String
+fileMetaFields =
     [ "id"
     , "name"
     , "mimeType"
@@ -60,10 +68,6 @@ fields =
     , "modifiedTime"
     , "size"
     ]
-
-
-type alias Cache =
-    { files : Dict Id FileMeta }
 
 
 mimeType =
@@ -140,14 +144,153 @@ intString =
 
 fileFields : String
 fileFields =
-    fields |> String.join ","
+    fileMetaFields |> String.join ","
 
 
 filesFields : String
 filesFields =
-    fields
+    fileMetaFields
         |> String.join ",files/"
         |> String.append "files/"
+
+
+
+-- Permission
+
+
+type alias Permission =
+    { id : String
+    , type_ : Type
+    , role : Role
+    }
+
+
+type Type
+    = User String
+    | Group String
+    | Domain String
+    | Anyone
+
+
+type Role
+    = Owner
+    | Organizer
+    | FileOrganizer
+    | Writer
+    | Commenter
+    | Reader
+
+
+permissionFields : String
+permissionFields =
+    [ "id", "type", "role", "emailAddress", "domain" ] |> String.join ","
+
+
+encodeType : Type -> List ( String, Value )
+encodeType type_ =
+    List.map (Tuple.mapSecond Encode.string) <|
+        case type_ of
+            User email ->
+                [ ( "type", "user" ), ( "emailAddress", email ) ]
+
+            Group email ->
+                [ ( "type", "group" ), ( "emailAddress", email ) ]
+
+            Domain domain ->
+                [ ( "type", "domain" ), ( "domain", domain ) ]
+
+            Anyone ->
+                [ ( "type", "anyone" ) ]
+
+
+decodeType : Decoder Type
+decodeType =
+    Decode.field "type" Decode.string
+        |> Decode.andThen
+            (\type_ ->
+                case type_ of
+                    "user" ->
+                        Decode.map User <|
+                            Decode.field "emailAddress" Decode.string
+
+                    "group" ->
+                        Decode.map Group <|
+                            Decode.field "emailAddress" Decode.string
+
+                    "domain" ->
+                        Decode.map Domain <|
+                            Decode.field "domain" Decode.string
+
+                    "anyone" ->
+                        Decode.succeed Anyone
+
+                    _ ->
+                        Decode.fail "No permission type"
+            )
+
+
+encodeRole : Role -> Value
+encodeRole role =
+    Encode.string <|
+        case role of
+            Owner ->
+                "owner"
+
+            Organizer ->
+                "organizer"
+
+            FileOrganizer ->
+                "fileOrganizer"
+
+            Writer ->
+                "writer"
+
+            Commenter ->
+                "commenter"
+
+            Reader ->
+                "reader"
+
+
+decodeRole : Decoder Role
+decodeRole =
+    Decode.string
+        |> Decode.andThen
+            (\str ->
+                case str of
+                    "owner" ->
+                        Decode.succeed Owner
+
+                    "organizer" ->
+                        Decode.succeed Organizer
+
+                    "fileOrganizer" ->
+                        Decode.succeed FileOrganizer
+
+                    "writer" ->
+                        Decode.succeed Writer
+
+                    "commenter" ->
+                        Decode.succeed Commenter
+
+                    "reader" ->
+                        Decode.succeed Reader
+
+                    _ ->
+                        Decode.fail "Not a permission type"
+            )
+
+
+decodePermission : Decoder Permission
+decodePermission =
+    Decode.succeed Permission
+        |> required "id" Decode.string
+        |> Decode.custom decodeType
+        |> required "role" decodeRole
+
+
+
+-- APIs
 
 
 folders : Token -> String -> Cmd (Result Error (List FileMeta))
@@ -441,6 +584,24 @@ getDataTask token file =
                             Ok bytes
         , timeout = Nothing
         }
+
+
+permissions_create :
+    Token
+    -> Id
+    -> { role : Role, type_ : Type }
+    -> Cmd (Result Error Permission)
+permissions_create token fileId { role, type_ } =
+    request_ token
+        "POST"
+        ("files/" ++ fileId ++ "/permissions")
+        [ Url.string "fields" permissionFields ]
+        (Http.jsonBody <|
+            Encode.object <|
+                ( "role", encodeRole role )
+                    :: encodeType type_
+        )
+        decodePermission
 
 
 request :

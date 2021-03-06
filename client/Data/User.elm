@@ -4,6 +4,7 @@ import Dict
 import Dict.Extra as Dict
 import Firestore
 import Firestore.Desc as Desc exposing (DocumentDesc)
+import Firestore.Path exposing (Id(..), SomeId, unId)
 import Html exposing (Html, a, div, img, input, node, span, text)
 import Html.Attributes as Attr exposing (attribute, class, src, type_)
 import Html.Events exposing (onClick)
@@ -12,12 +13,8 @@ import Set
 import Util exposing (onChangeValues)
 
 
-type alias Id =
-    String
-
-
 type alias User =
-    { id : Id
+    { id : SomeId
     , name : String
     , image : String
     , email : String
@@ -80,20 +77,21 @@ avatar user =
         ]
 
 
-selectionList : List User -> List Id -> List Id -> Html (List Id)
+selectionList :
+    List User
+    -> List (Id User)
+    -> List (Id User)
+    -> Html (List (Id User))
 selectionList choices actives inactives =
     let
         values =
-            actives
-
-        inactiveSet =
-            Set.fromList inactives
+            actives |> List.map unId
     in
     node "ui-dropdown"
         [ class "ui small multiple search selection dropdown"
         , attribute "multiple" ""
         , attribute "value" <| String.join "," values
-        , onChangeValues
+        , onChangeValues |> Attr.map (List.map Id)
         ]
     <|
         [ input
@@ -117,7 +115,12 @@ selectionList choices actives inactives =
         ]
 
 
-list : Bool -> List User -> List Id -> List Id -> Html (List Id)
+list :
+    Bool
+    -> List User
+    -> List (Id User)
+    -> List (Id User)
+    -> Html (List (Id User))
 list editable choices actives inactives =
     if editable then
         selectionList choices actives inactives
@@ -126,7 +129,7 @@ list editable choices actives inactives =
         let
             users =
                 List.filterMap
-                    (\id -> List.find (\user -> user.id == id) choices)
+                    (\(Id id) -> List.find (\user -> user.id == id) choices)
                 <|
                     actives
                         ++ inactives

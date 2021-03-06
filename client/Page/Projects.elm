@@ -4,12 +4,12 @@ import Array
 import Array.Extra as Array
 import Data exposing (Auth, Data, project)
 import Data.Client as Client
-import Data.Project as Project
+import Data.Project as Project exposing (Process, Project)
 import Dict
 import Firestore exposing (..)
 import Firestore.Access as Access exposing (Accessor)
 import Firestore.Lens as Lens exposing (o)
-import Firestore.Path as Path exposing (Id)
+import Firestore.Path as Path exposing (Id(..))
 import Firestore.Remote as Remote exposing (Remote(..))
 import Firestore.Update as Update exposing (Updater)
 import GDrive
@@ -37,8 +37,9 @@ type Msg
     | HideModal
     | Search String
     | SearchResult (List GDrive.FileMeta)
-    | AddProject Bool GDrive.FileMeta
-    | AddProjectProcess Id Project.Process GDrive.FileMeta
+    | JoinProject Project
+    | AddProject GDrive.FileMeta
+    | AddProjectProcess (Id Project) Process GDrive.FileMeta
     | None
 
 
@@ -47,42 +48,41 @@ init =
     List
 
 
-update : Auth -> Msg -> Model -> ( Model, Updater Data, Cmd Msg )
+update : Auth -> Msg -> Model -> ( Model, Updater Data Msg )
 update auth msg model =
     case ( msg, model ) of
         ( ShowModal, _ ) ->
             ( SearchFolder { loading = False, wait = Nothing, result = [] }
             , Update.none
-            , Cmd.none
             )
 
         ( HideModal, _ ) ->
-            ( List, Update.none, Cmd.none )
+            ( List, Update.none )
 
         ( Search "", _ ) ->
-            ( model, Update.none, Cmd.none )
+            ( model, Update.none )
 
         ( Search s, SearchFolder o ) ->
             if o.loading then
                 ( SearchFolder { o | wait = Just s }
                 , Update.none
-                , Cmd.none
                 )
 
             else
                 ( SearchFolder { o | loading = True, wait = Nothing }
-                , Update.none
-                , GDrive.folders auth.token s
-                    |> Cmd.map
-                        (\r ->
-                            case r of
-                                Err error ->
-                                    always (SearchResult []) <|
-                                        Debug.log "error" error
+                , Update.command <|
+                    \_ ->
+                        GDrive.folders auth.token s
+                            |> Cmd.map
+                                (\r ->
+                                    case r of
+                                        Err error ->
+                                            always (SearchResult []) <|
+                                                Debug.log "error" error
 
-                                Ok files ->
-                                    SearchResult files
-                        )
+                                        Ok files ->
+                                            SearchResult files
+                                )
                 )
 
         ( SearchResult files, SearchFolder o ) ->
@@ -90,74 +90,68 @@ update auth msg model =
                 Nothing ->
                     ( SearchFolder { o | loading = False, result = files }
                     , Update.none
-                    , Cmd.none
                     )
 
                 Just s ->
                     ( SearchFolder
                         { o | loading = True, wait = Nothing, result = files }
-                    , Update.none
-                    , GDrive.folders auth.token s
-                        |> Cmd.map
-                            (\r ->
-                                case r of
-                                    Err error ->
-                                        always (SearchResult []) <|
-                                            Debug.log "error" error
+                    , Update.command <|
+                        \_ ->
+                            GDrive.folders auth.token s
+                                |> Cmd.map
+                                    (\r ->
+                                        case r of
+                                            Err error ->
+                                                always (SearchResult []) <|
+                                                    Debug.log "error" error
 
-                                    Ok files_ ->
-                                        SearchResult files_
-                            )
+                                            Ok files_ ->
+                                                SearchResult files_
+                                    )
                     )
 
-        ( AddProject exists file, _ ) ->
-            let
-                projectRef =
-                    Firestore.ref <| Path.fromIds [ "projects", file.id ]
+        ( JoinProject project, _ ) ->
+            ( model
+            , Update.modify (Data.myClient auth) Client.desc <|
+                \client ->
+                    { client
+                        | projects =
+                            Array.push (Data.projectRef <| Id project.id)
+                                client.projects
+                    }
+            )
 
-                userRef =
-                    Firestore.ref <| Path.fromIds [ "users", auth.uid ]
-            in
+        ( AddProject file, _ ) ->
             ( model
             , Update.all
                 [ Update.modify (Data.myClient auth) Client.desc <|
                     \client ->
                         { client
                             | projects =
-                                Array.push projectRef client.projects
+                                Array.push (Data.projectRef <| Id file.id)
+                                    client.projects
                         }
-                , Update.alter
-                    (o Data.projects <| Lens.doc file.id)
+                , Update.set
+                    (o Data.projects <| Lens.doc <| Id file.id)
                     Project.desc
                   <|
-                    \mp ->
-                        Update.Update <|
-                            case mp of
-                                Nothing ->
-                                    Project.init file userRef
-
-                                Just p ->
-                                    { p
-                                        | members =
-                                            userRef :: p.members
-                                    }
-                ]
-            , if exists then
-                Cmd.none
-
-              else
-                Cmd.batch <|
+                    Project.init file <|
+                        Data.myRef auth
+                , Update.batch <|
                     flip List.map Project.defaultProcesses <|
-                        \process ->
+                        \process _ ->
                             GDrive.createFolder
                                 auth.token
                                 process.name
                                 [ file.id ]
                                 |> Cmd.map
                                     (Result.map
-                                        (AddProjectProcess file.id process)
+                                        (AddProjectProcess (Id file.id)
+                                            process
+                                        )
                                         >> Result.withDefault None
                                     )
+                ]
             )
 
         ( AddProjectProcess pid process file, _ ) ->
@@ -171,11 +165,10 @@ update auth msg model =
                         | processes =
                             Dict.insert file.id process project.processes
                     }
-            , Cmd.none
             )
 
         _ ->
-            ( model, Update.none, Cmd.none )
+            ( model, Update.none )
 
 
 remote : Remote a -> (a -> Html msg) -> Html msg
@@ -202,35 +195,40 @@ view : Auth -> Model -> Data -> Accessor Data (Html Msg)
 view auth model data =
     flip2 Access.andThen2
         (Access.access
-            (o (Data.myProjects auth) <| Lens.getAllRemote)
+            (o (Data.myProjects auth) Lens.getAll)
             data
         )
         (Access.access (o (Data.myClient auth) Lens.get) data)
     <|
-        \projects_ client ->
+        \projects client ->
             let
-                projects =
+                workings =
                     List.filterMap
                         (\p ->
                             Array.toList client.projects
                                 |> List.findIndex
-                                    (\ref ->
-                                        Firestore.getId ref
-                                            == Remote.unwrap "" .id p
-                                    )
+                                    (\ref -> Firestore.getId ref == Id p.id)
                                 |> Maybe.map
                                     (\i -> ( i, p ))
                         )
-                        projects_
+                        projects
                         |> List.sortBy Tuple.first
+
+                inviteds =
+                    flip List.filter projects <|
+                        \p ->
+                            Array.toList client.projects
+                                |> List.any
+                                    (\ref -> Firestore.getId ref == Id p.id)
+                                |> not
             in
             Access.map
                 (\html ->
                     div []
                         [ div [ class "ui cards", style "margin" "20px" ] <|
-                            List.append
-                                (List.map projectCard projects)
-                                [ addProjectCard ]
+                            List.map projectCard workings
+                                ++ List.map invitedProjectCard inviteds
+                                ++ [ addProjectCard ]
                         , html
                         ]
                 )
@@ -238,23 +236,30 @@ view auth model data =
                 searchModal auth data model
 
 
-projectCard ( i, rp ) =
+projectCard ( i, project ) =
     a
         [ class "ui card centered"
-        , href <|
-            "/"
-                ++ String.fromInt i
-                ++ "/dashboard"
+        , href <| "/" ++ String.fromInt i ++ "/dashboard"
         ]
         [ div [ class "content" ]
-            [ remote rp <|
-                \project ->
-                    div
-                        [ class
-                            "center aligned header"
-                        ]
-                        [ text project.name ]
+            [ div [ class "center aligned header" ] [ text project.name ]
             ]
+        ]
+
+
+invitedProjectCard project =
+    div
+        [ class "ui card centered" ]
+        [ div [ class "content" ]
+            [ div [ class "center aligned header" ] [ text project.name ]
+            , div [ class "center aligned description" ]
+                [ text "プロジェクトに招待されています" ]
+            ]
+        , div
+            [ class "ui bottom attached primary button"
+            , onClick <| JoinProject project
+            ]
+            [ icon "sign-in", text "参加する" ]
         ]
 
 
@@ -320,7 +325,8 @@ searchModal auth data model =
                             ]
                     )
                 <|
-                    projectList auth data result
+                    projectList auth data <|
+                        List.filter (not << .trashed) result
 
             _ ->
                 Access.success <| text ""
@@ -332,9 +338,7 @@ projectList auth data files =
         flip List.map files <|
             \file ->
                 Access.accessMapMaybe
-                    (o Data.projects <|
-                        o (Lens.doc file.id) Lens.get
-                    )
+                    (o Data.projects <| o (Lens.doc <| Id file.id) Lens.get)
                     data
                 <|
                     \mproject ->
@@ -355,10 +359,8 @@ projectList auth data files =
                                 , button
                                     [ class
                                         "ui right floated basic primary button"
-                                    , classIf (status == Just True)
-                                        "disabled"
-                                    , onClick <|
-                                        AddProject (Maybe.isJust status) file
+                                    , classIf (Maybe.isJust status) "disabled"
+                                    , onClick <| AddProject file
                                     ]
                                   <|
                                     case status of
@@ -368,8 +370,8 @@ projectList auth data files =
                                             ]
 
                                         Just False ->
-                                            [ icon "sign-in"
-                                            , text "参加する"
+                                            [ icon "users"
+                                            , text "招待が必要"
                                             ]
 
                                         Just True ->
