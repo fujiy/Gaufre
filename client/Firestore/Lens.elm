@@ -5,7 +5,8 @@ import Dict
 import Firestore.Access as Access
 import Firestore.Desc exposing (Desc)
 import Firestore.Internal exposing (..)
-import Firestore.Path as Path exposing (Id(..), Path)
+import Firestore.Path as Path exposing (Path)
+import Firestore.Path.Id as Id exposing (Id(..))
 import Firestore.Path.Map as PathMap
 import Firestore.Path.Map.Slice as Slice
 import Firestore.Remote as Remote exposing (Remote(..))
@@ -225,13 +226,13 @@ subCollection getter setter =
 
 
 doc : Id r -> Lens Col (Collection s r) Doc (Document s r)
-doc (Id id) =
+doc id =
     Lens
         { access =
             \(Collection col) ->
                 Accessor
                     (Slice.doc id)
-                    (Dict.get id col.docs
+                    (Id.get id col.docs
                         |> Maybe.withDefault (Document col.empty Loading)
                         |> UpToDate
                     )
@@ -241,7 +242,7 @@ doc (Id id) =
                     \(Collection col) ->
                         { value =
                             Collection
-                                { col | docs = Dict.insert id d col.docs }
+                                { col | docs = Id.insert id d col.docs }
                         , requests =
                             Slice.addDoc (Slice.doc id) (PathMap.docRootItem u)
                         , afterwards = noUpdater
@@ -321,7 +322,7 @@ where_ field qop desc a =
                     (Dict.get key col.q
                         |> Maybe.withDefault
                             (Collection
-                                { col | docs = Dict.empty, q = Dict.empty }
+                                { col | docs = Id.empty, q = Dict.empty }
                             )
                         |> UpToDate
                     )
@@ -349,7 +350,7 @@ getAllRemote =
                 Accessor Slice.colItem
                     (let
                         rs =
-                            Dict.values col.docs
+                            Id.items col.docs
                                 |> List.map (\(Document _ r) -> r)
                      in
                      if List.isEmpty rs then
@@ -377,7 +378,7 @@ getAll =
                 Accessor Slice.colItem
                     (let
                         rs =
-                            Dict.values col.docs
+                            Id.items col.docs
                                 |> List.filterMap
                                     (\(Document _ r) -> Remote.toMaybe r)
                      in

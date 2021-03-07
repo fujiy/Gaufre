@@ -2,7 +2,8 @@ module Firestore.Path.Map.Slice exposing (..)
 
 import Array exposing (Array)
 import Dict
-import Firestore.Path as Path exposing (SomeId)
+import Firestore.Path as Path
+import Firestore.Path.Id as Id exposing (Id(..))
 import Firestore.Path.Map as Map exposing (..)
 import Json.Encode as Encode exposing (Value)
 
@@ -31,13 +32,13 @@ compose sop spq =
     spq >> Array.foldl (sop >> Array.append) Array.empty
 
 
-col : SomeId -> Slice (Map a) (Col a)
-col id c =
+col : Id x -> Slice (Map a) (Col a)
+col (Id id) c =
     singleton <| Root <| Dict.singleton id c
 
 
-doc : SomeId -> Slice (Col a) (Doc a)
-doc id d =
+doc : Id x -> Slice (Col a) (Doc a)
+doc (Id id) d =
     singleton <| Col Nothing (Dict.singleton id d) Dict.empty
 
 
@@ -50,8 +51,8 @@ query field op value c =
     singleton <| Col Nothing Dict.empty (Dict.singleton ( field, op, v ) c)
 
 
-subCol : SomeId -> Slice (Doc a) (Col a)
-subCol id c =
+subCol : Id x -> Slice (Doc a) (Col a)
+subCol (Id id) c =
     singleton <| Doc Nothing (Dict.singleton id c)
 
 

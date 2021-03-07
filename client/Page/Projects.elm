@@ -4,12 +4,14 @@ import Array
 import Array.Extra as Array
 import Data exposing (Auth, Data, project)
 import Data.Client as Client
-import Data.Project as Project exposing (Process, Project)
+import Data.Project as Project exposing (Project)
+import Data.Work as Work exposing (Process)
 import Dict
 import Firestore exposing (..)
 import Firestore.Access as Access exposing (Accessor)
 import Firestore.Lens as Lens exposing (o)
-import Firestore.Path as Path exposing (Id(..))
+import Firestore.Path as Path
+import Firestore.Path.Id as Id exposing (Id)
 import Firestore.Remote as Remote exposing (Remote(..))
 import Firestore.Update as Update exposing (Updater)
 import GDrive
@@ -116,7 +118,7 @@ update auth msg model =
                 \client ->
                     { client
                         | projects =
-                            Array.push (Data.projectRef <| Id project.id)
+                            Array.push (Data.projectRef <| Id.self project)
                                 client.projects
                     }
             )
@@ -128,17 +130,18 @@ update auth msg model =
                     \client ->
                         { client
                             | projects =
-                                Array.push (Data.projectRef <| Id file.id)
+                                Array.push
+                                    (Data.projectRef <| Id.fromString file.id)
                                     client.projects
                         }
                 , Update.set
-                    (o Data.projects <| Lens.doc <| Id file.id)
+                    (o Data.projects <| Lens.doc <| Id.fromString file.id)
                     Project.desc
                   <|
                     Project.init file <|
                         Data.myRef auth
                 , Update.batch <|
-                    flip List.map Project.defaultProcesses <|
+                    flip List.map Work.defaultProcesses <|
                         \process _ ->
                             GDrive.createFolder
                                 auth.token
@@ -146,7 +149,8 @@ update auth msg model =
                                 [ file.id ]
                                 |> Cmd.map
                                     (Result.map
-                                        (AddProjectProcess (Id file.id)
+                                        (AddProjectProcess
+                                            (Id.fromString file.id)
                                             process
                                         )
                                         >> Result.withDefault None
@@ -163,7 +167,9 @@ update auth msg model =
                 \project ->
                     { project
                         | processes =
-                            Dict.insert file.id process project.processes
+                            Id.insert (Id.fromString file.id)
+                                process
+                                project.processes
                     }
             )
 
@@ -207,7 +213,7 @@ view auth model data =
                         (\p ->
                             Array.toList client.projects
                                 |> List.findIndex
-                                    (\ref -> Firestore.getId ref == Id p.id)
+                                    (\ref -> Firestore.getId ref == Id.self p)
                                 |> Maybe.map
                                     (\i -> ( i, p ))
                         )
@@ -219,7 +225,7 @@ view auth model data =
                         \p ->
                             Array.toList client.projects
                                 |> List.any
-                                    (\ref -> Firestore.getId ref == Id p.id)
+                                    (\ref -> Firestore.getId ref == Id.self p)
                                 |> not
             in
             Access.map
@@ -338,7 +344,9 @@ projectList auth data files =
         flip List.map files <|
             \file ->
                 Access.accessMapMaybe
-                    (o Data.projects <| o (Lens.doc <| Id file.id) Lens.get)
+                    (o Data.projects <|
+                        o (Lens.doc <| Id.fromString file.id) Lens.get
+                    )
                     data
                 <|
                     \mproject ->

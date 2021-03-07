@@ -7,7 +7,7 @@ import Data.User as User
 import Firestore
 import Firestore.Access as Access exposing (Accessor)
 import Firestore.Lens as Lens exposing (o)
-import Firestore.Path exposing (Id(..))
+import Firestore.Path.Id as Id exposing (Id)
 import Firestore.Update as Update exposing (Updater)
 import Html exposing (Html, a, div, map, text)
 import Html.Attributes as Html exposing (class, href, style)
@@ -69,7 +69,7 @@ urlChanged model url =
                                 Maybe.map
                                     (\workId ->
                                         Work <|
-                                            Work.init (Id workId) <|
+                                            Work.init (Id.fromString workId) <|
                                                 Maybe.withDefault workId mf
                                     )
                                     mw
@@ -194,7 +194,7 @@ view auth model data =
                                 (\p ->
                                     Members.view auth m data p
                                         |> Access.map
-                                            (map <| MembersMsg <| Id p.id)
+                                            (map <| MembersMsg <| Id.self p)
                                 )
             ]
 

@@ -2,7 +2,8 @@ module Firestore.Path.Map exposing (..)
 
 import Dict exposing (Dict)
 import Dict.Extra as Dict
-import Firestore.Path as Path exposing (Path, SomeId)
+import Firestore.Path as Path exposing (Path)
+import Firestore.Path.Id as Path exposing (IdMap(..), SomeId)
 import Json.Decode as Decode exposing (Decoder)
 import Json.Encode as Encode exposing (Value)
 import Maybe.Extra as Maybe
@@ -130,14 +131,14 @@ at id (Root d) =
     Dict.get id d |> Maybe.withDefault emptyCol
 
 
-subs : Map a -> Dict SomeId (Col a)
-subs (Root d) =
-    d
+cols : Map a -> IdMap x (Col a)
+cols (Root d) =
+    IdMap d
 
 
-subCols : Doc a -> Dict SomeId (Col a)
+subCols : Doc a -> IdMap x (Col a)
 subCols (Doc _ d) =
-    d
+    IdMap d
 
 
 subQueries :
@@ -156,9 +157,9 @@ subQueries (Col _ _ q) =
             )
 
 
-subDocs : Col a -> Dict SomeId (Doc a)
+subDocs : Col a -> IdMap x (Doc a)
 subDocs (Col _ d _) =
-    d
+    IdMap d
 
 
 insert : Path -> a -> Map a -> Map a

@@ -4,7 +4,7 @@ import Dict
 import Dict.Extra as Dict
 import Firestore
 import Firestore.Desc as Desc exposing (DocumentDesc)
-import Firestore.Path exposing (Id(..), SomeId, unId)
+import Firestore.Path.Id as Id exposing (Id, SelfId, unId)
 import Html exposing (Html, a, div, img, input, node, span, text)
 import Html.Attributes as Attr exposing (attribute, class, src, type_)
 import Html.Events exposing (onClick)
@@ -14,7 +14,7 @@ import Util exposing (onChangeValues)
 
 
 type alias User =
-    { id : SomeId
+    { id : SelfId
     , name : String
     , image : String
     , email : String
@@ -69,6 +69,15 @@ label_ user =
         ]
 
 
+basicLabel_ : User -> Html msg
+basicLabel_ user =
+    div
+        [ class "ui small disabled image label" ]
+        [ img [ src user.image ] []
+        , text user.name
+        ]
+
+
 avatar : User -> Html msg
 avatar user =
     span []
@@ -88,17 +97,13 @@ selectionList choices actives inactives =
             actives |> List.map unId
     in
     node "ui-dropdown"
-        [ class "ui small multiple search selection dropdown"
+        [ class "ui tiny multiple search selection dropdown"
         , attribute "multiple" ""
         , attribute "value" <| String.join "," values
-        , onChangeValues |> Attr.map (List.map Id)
+        , onChangeValues |> Attr.map (List.map Id.fromString)
         ]
     <|
-        [ input
-            [ type_ "hidden"
-            , Attr.name "staffs"
-            ]
-            []
+        [ input [ type_ "hidden", Attr.name "staffs" ] []
         , Html.i [ class "dropdown icon" ] []
         , div [ class "default text" ] [ text "メンバーを割り当てる" ]
         , div [ class "menu" ] <|
@@ -127,16 +132,20 @@ list editable choices actives inactives =
 
     else
         let
-            users =
+            activeUsers =
                 List.filterMap
-                    (\(Id id) -> List.find (\user -> user.id == id) choices)
-                <|
+                    (\id -> List.find (\user -> Id.self user == id) choices)
                     actives
-                        ++ inactives
+
+            inactiveUsers =
+                List.filterMap
+                    (\id -> List.find (\user -> Id.self user == id) choices)
+                    inactives
         in
-        if List.isEmpty users then
+        if List.isEmpty actives && List.isEmpty inactives then
             text "なし"
 
         else
             span [] <|
-                List.map label_ users
+                List.map label_ activeUsers
+                    ++ List.map basicLabel_ inactiveUsers

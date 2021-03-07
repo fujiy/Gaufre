@@ -9,7 +9,8 @@ import Firestore exposing (..)
 import Firestore.Access as Access exposing (Accessor)
 import Firestore.Desc as Desc exposing (FirestoreDesc)
 import Firestore.Lens as Lens exposing (o, where_)
-import Firestore.Path as Path exposing (Id(..), unId)
+import Firestore.Path as Path
+import Firestore.Path.Id as Id exposing (Id, unId)
 import Firestore.Update as Update exposing (Updater)
 import GDrive
 import Maybe.Extra as Maybe
@@ -47,7 +48,7 @@ userRole p id =
 
 myRole : Project -> Auth -> Project.Role
 myRole p auth =
-    userRole p <| Id auth.uid
+    userRole p <| Id.fromString auth.uid
 
 
 
@@ -86,14 +87,19 @@ projects =
 -- User
 
 
+myId : Auth -> Id x
+myId auth =
+    Id.fromString auth.uid
+
+
 myClient : Auth -> Lens Root Data Doc Client.Document
 myClient auth =
-    o clients <| Lens.doc <| Id auth.uid
+    o clients <| Lens.doc <| myId auth
 
 
 me : Auth -> Lens Root Data Doc User.Document
 me auth =
-    o users <| Lens.doc <| Id auth.uid
+    o users <| Lens.doc <| myId auth
 
 
 userHasEmail : String -> Lens Root Data Col User.Collection
@@ -102,13 +108,13 @@ userHasEmail email =
 
 
 userRef : Id User -> User.Reference
-userRef (Id id) =
-    Firestore.ref <| Path.fromIds [ "users", id ]
+userRef id =
+    Firestore.ref <| Path.fromIds [ "users", Id.unId id ]
 
 
 myRef : Auth -> User.Reference
 myRef auth =
-    userRef <| Id auth.uid
+    userRef <| myId auth
 
 
 
@@ -118,10 +124,7 @@ myRef auth =
 myProjects : Auth -> Lens Root Data Col Project.Collection
 myProjects auth =
     o projects <|
-        Lens.where_ "members"
-            Lens.CONTAINS
-            Desc.reference
-            (userRef <| Id auth.uid)
+        Lens.where_ "members" Lens.CONTAINS Desc.reference (myRef auth)
 
 
 currentProject : Auth -> Int -> Lens Root Data Doc Project.Document
@@ -152,8 +155,8 @@ projectMembers p =
 
 
 projectRef : Id Project -> Project.Reference
-projectRef (Id id) =
-    Firestore.ref <| Path.fromIds [ "projects", id ]
+projectRef id =
+    Firestore.ref <| Path.fromIds [ "projects", unId id ]
 
 
 
@@ -189,7 +192,7 @@ inviteMember auth projectId name =
                             \p ->
                                 { p
                                     | members =
-                                        userRef (Id user.id) :: p.members
+                                        userRef (Id.self user) :: p.members
                                 }
                         , Update.command <|
                             \_ ->

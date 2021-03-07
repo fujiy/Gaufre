@@ -12,7 +12,8 @@ import File exposing (File)
 import Firestore exposing (Id)
 import Firestore.Access as Access exposing (Accessor)
 import Firestore.Lens as Lens exposing (o)
-import Firestore.Path as Path exposing (Id(..), unId)
+import Firestore.Path as Path
+import Firestore.Path.Id as Id exposing (Id, unId)
 import Firestore.Remote exposing (Remote(..))
 import Firestore.Update as Update exposing (Updater)
 import GDrive exposing (FileMeta)
@@ -88,8 +89,8 @@ type Msg
 initialize : Auth -> Model -> Cmd Msg
 initialize auth model =
     let
-        (Id id) =
-            model.workId
+        id =
+            unId model.workId
     in
     if id == model.folderId then
         Cmd.batch
@@ -331,16 +332,16 @@ update auth msg m model =
 userRefs : List (Id User) -> List User.Reference
 userRefs =
     List.map <|
-        \(Id id) ->
+        \id ->
             Firestore.ref <|
-                Path.fromIds [ "users", id ]
+                Path.fromIds [ "users", unId id ]
 
 
 view : Auth -> Model -> Data -> Project -> Accessor Data (Html Msg)
 view auth model data project =
     flip2 Access.map2
         (Access.access
-            (o (Data.project <| Id project.id) <|
+            (o (Data.project <| Id.self project) <|
                 o (Project.work model.workId) Lens.get
             )
             data
@@ -355,19 +356,19 @@ view auth model data project =
                         |> .manageWorkStaffs
 
                 process =
-                    Dict.get work.process project.processes
-                        |> Maybe.withDefault Project.nullProcess
+                    Id.get work.process project.processes
+                        |> Maybe.withDefault Work.nullProcess
 
                 parts =
-                    List.filterMap (flip Dict.get project.parts) work.belongsTo
+                    List.filterMap (flip Id.get project.parts) work.belongsTo
 
                 part =
                     List.minimumBy .order parts
-                        |> Maybe.withDefault Project.nullPart
+                        |> Maybe.withDefault Work.nullPart
 
                 maxPart =
                     List.maximumBy .order parts
-                        |> Maybe.withDefault Project.nullPart
+                        |> Maybe.withDefault Work.nullPart
 
                 workName =
                     if List.length parts == 1 then
@@ -610,31 +611,30 @@ actionModal model =
                 "フォルダ"
     in
     node "ui-modal"
-        [ boolAttr "show" <| model.modal /= Hidden
-        , class "ui tiny modal"
-        , Events.on "hide" <| Decode.succeed <| ModalState Hidden
-        , Events.on "approve" <|
-            Decode.succeed <|
-                case model.modal of
-                    RenameModal name ->
-                        single |> Maybe.unwrap None (Rename name)
+        [ class "ui tiny modal"
+        , boolAttr "show" <| model.modal /= Hidden
+        , onHide <| ModalState Hidden
+        , onApprove <|
+            case model.modal of
+                RenameModal name ->
+                    single |> Maybe.unwrap None (Rename name)
 
-                    UploadModal files ->
-                        Upload files
+                UploadModal files ->
+                    Upload files
 
-                    CreateFolderModal name ->
-                        CreateFolder name
+                CreateFolderModal name ->
+                    CreateFolder name
 
-                    DownloadModal ->
-                        Download <|
-                            if List.isEmpty selection then
-                                Maybe.toList model.folder
+                DownloadModal ->
+                    Download <|
+                        if List.isEmpty selection then
+                            Maybe.toList model.folder
 
-                            else
-                                selection
+                        else
+                            selection
 
-                    _ ->
-                        None
+                _ ->
+                    None
         ]
     <|
         case model.modal of

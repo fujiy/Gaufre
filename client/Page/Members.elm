@@ -6,7 +6,7 @@ import Data.User exposing (User)
 import Firestore exposing (Id)
 import Firestore.Access as Access exposing (Accessor)
 import Firestore.Lens as Lens exposing (o)
-import Firestore.Path exposing (Id(..))
+import Firestore.Path.Id as Id exposing (Id)
 import Firestore.Update as Update exposing (Updater)
 import Html exposing (Html, button, div, img, input, node, table, tbody, td, text, th, thead, tr)
 import Html.Attributes exposing (class, colspan, placeholder, src, type_)
@@ -95,7 +95,7 @@ tableRow project user =
         , td []
             [ div [ class "header" ] [ text user.name ] ]
         , td [ class "collapsing" ]
-            [ case Data.userRole project <| Id user.id of
+            [ case Data.userRole project <| Id.self user of
                 Project.Owner ->
                     text "プロジェクトオーナー"
 

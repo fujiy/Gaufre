@@ -2,11 +2,11 @@ module Data.Work exposing (..)
 
 import Data.User as User exposing (User)
 import Firestore exposing (..)
-import Firestore.Desc as Desc exposing (DocumentDesc)
-import Firestore.Path exposing (Id(..), SomeId)
-import Html exposing (Html, div, text)
-import Html.Attributes exposing (class)
-import Util exposing (icon)
+import Firestore.Desc as Desc exposing (Desc, DocumentDesc)
+import Firestore.Path.Id as Id exposing (Id, IdMap, SelfId, SomeId, unId)
+import Html exposing (Html, a, div, img, input, node, span, text)
+import Html.Attributes as Attr exposing (attribute, class, src, type_)
+import Util exposing (icon, onChangeValues)
 
 
 type Status
@@ -18,10 +18,10 @@ type Status
 
 
 type alias Work =
-    { id : SomeId
+    { id : SelfId
     , name : String
-    , process : SomeId
-    , belongsTo : List SomeId
+    , process : Id Process
+    , belongsTo : List (Id Part)
     , staffs : List User.Reference
     , reviewers : List User.Reference
     }
@@ -39,12 +39,12 @@ type alias Document =
     Firestore.Document () Work
 
 
-init : Id Work -> String -> Id x -> Id y -> Work
-init (Id id) name (Id process) (Id part) =
-    { id = id
+init : Id Work -> String -> Id Process -> Id Part -> Work
+init id name processId partId =
+    { id = unId id
     , name = name
-    , process = process
-    , belongsTo = [ part ]
+    , process = processId
+    , belongsTo = [ partId ]
     , staffs = []
     , reviewers = []
     }
@@ -54,8 +54,8 @@ desc : DocumentDesc () Work
 desc =
     Desc.documentWithId Work <|
         Desc.field "name" .name Desc.string
-            >> Desc.field "process" .process Desc.string
-            >> Desc.field "belongsTo" .belongsTo (Desc.list Desc.string)
+            >> Desc.field "process" .process Desc.id
+            >> Desc.field "belongsTo" .belongsTo (Desc.list Desc.id)
             >> Desc.field "staffs" .staffs (Desc.list Desc.reference)
             >> Desc.field "reviewers" .reviewers (Desc.list Desc.reference)
 
@@ -152,3 +152,107 @@ statusNumber status =
 --     , div [ class "content" ]
 --         [ div [ class "header" ] [ text header ] ]
 --     ]
+-- Process
+
+
+type alias Process =
+    { name : String
+    , order : Float
+    , upstreams : List SelfId
+    }
+
+
+nullProcess : Process
+nullProcess =
+    { name = "Null Process", order = 0, upstreams = [] }
+
+
+processDesc : Desc Process
+processDesc =
+    Desc.object Process <|
+        Desc.field "name" .name Desc.string
+            >> Desc.field "order" .order Desc.float
+            >> Desc.field "upstreams" .upstreams (Desc.list Desc.string)
+
+
+defaultProcesses : List Process
+defaultProcesses =
+    [ { name = "脚本", order = 0, upstreams = [] }
+    , { name = "設定", order = 1, upstreams = [] }
+    , { name = "絵コンテ", order = 2, upstreams = [] }
+    , { name = "レイアウト", order = 3, upstreams = [] }
+    , { name = "作画", order = 4, upstreams = [] }
+    , { name = "彩色", order = 5, upstreams = [] }
+    , { name = "背景", order = 6, upstreams = [] }
+    , { name = "撮影", order = 7, upstreams = [] }
+    ]
+
+
+
+-- Part
+
+
+type alias Part =
+    { name : String
+    , order : Float
+    , parent : Maybe SelfId
+    }
+
+
+nullPart : Part
+nullPart =
+    { name = "Null Part", order = 0, parent = Nothing }
+
+
+partDesc : Desc Part
+partDesc =
+    Desc.object Part <|
+        Desc.field "name" .name Desc.string
+            >> Desc.field "order" .order Desc.float
+            >> Desc.option "parent" .parent Desc.string
+
+
+partList :
+    IdMap Part Part
+    -> Work
+    -> Html (List (Id Part))
+partList parts work =
+    let
+        values =
+            work.belongsTo |> List.map unId
+    in
+    node "ui-dropdown"
+        [ class "ui mini multiple search selection dropdown select-all"
+        , attribute "multiple" ""
+        , attribute "value" <| String.join "," values
+        , onChangeValues
+            |> Attr.map
+                (\ids_ ->
+                    let
+                        ids =
+                            List.map Id.fromString ids_
+                    in
+                    if List.isEmpty ids then
+                        work.belongsTo
+
+                    else
+                        ids
+                )
+        ]
+    <|
+        [ input [ type_ "hidden", Attr.name "staffs" ] []
+        , Html.i [ class "dropdown icon" ] []
+        , div [ class "default text" ] [ text "属するカット" ]
+        , div [ class "menu" ] <|
+            List.map
+                (\( id, part ) ->
+                    div
+                        [ class "item"
+                        , attribute "data-value" <| unId id
+                        ]
+                    <|
+                        [ span [] [ text part.name ] ]
+                )
+            <|
+                Id.toList parts
+        ]

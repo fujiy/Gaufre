@@ -23,7 +23,8 @@ module Firestore exposing
 
 import Firestore.Desc as Desc exposing (FirestoreDesc(..))
 import Firestore.Internal as Internal exposing (..)
-import Firestore.Path as Path exposing (Id(..), Path)
+import Firestore.Path as Path exposing (Path)
+import Firestore.Path.Id as Id exposing (Id(..))
 import Firestore.Path.Map as PathMap exposing (Paths)
 import Firestore.Path.Map.Slice as Slice
 import Firestore.Remote as Remote exposing (Remote(..))
@@ -53,7 +54,7 @@ type FirestoreSub r msg
 
 
 type alias Id a =
-    Path.Id a
+    Id.Id a
 
 
 type alias Collection s r =
@@ -107,7 +108,7 @@ ref =
 
 getId : Reference s r -> Id r
 getId (Reference p) =
-    Path.getLast p |> Maybe.withDefault "" |> Id
+    Path.getLast p |> Maybe.withDefault (Id "")
 
 
 init : FirestoreDesc r -> Firestore r msg

@@ -1,25 +1,24 @@
 module Data.Project exposing (..)
 
 import Data.User as User
-import Data.Work as Work exposing (Work)
-import Dict exposing (Dict)
+import Data.Work as Work exposing (Part, Process, Work)
 import Dict.Extra as Dict
 import Firestore exposing (..)
 import Firestore.Desc as Desc exposing (Desc, DocumentDesc)
-import Firestore.Lens as Lens exposing (lens, o)
-import Firestore.Path exposing (Id(..), SomeId)
+import Firestore.Lens as Lens exposing (o)
+import Firestore.Path.Id as Id exposing (Id, IdMap, SelfId)
 import GDrive
 import Maybe.Extra as Maybe
 
 
 type alias Project =
-    { id : String
+    { id : SelfId
     , name : String
     , members : List User.Reference
     , admins : List User.Reference
     , owner : User.Reference
-    , processes : Dict SomeId Process
-    , parts : Dict SomeId Part
+    , processes : IdMap Process Process
+    , parts : IdMap Part Part
     }
 
 
@@ -98,8 +97,8 @@ desc =
             >> Desc.field "members" .members (Desc.list Desc.reference)
             >> Desc.field "admins" .admins (Desc.list Desc.reference)
             >> Desc.field "owner" .owner Desc.reference
-            >> Desc.field "proesses" .processes (Desc.dict processDesc)
-            >> Desc.field "parts" .parts (Desc.dict partDesc)
+            >> Desc.field "proesses" .processes (Desc.idMap Work.processDesc)
+            >> Desc.field "parts" .parts (Desc.idMap Work.partDesc)
         )
         Sub
         (Desc.collection "works" .works Work.desc)
@@ -130,8 +129,8 @@ init file user =
     , members = [ user ]
     , admins = [ user ]
     , owner = user
-    , processes = Dict.empty
-    , parts = Dict.empty
+    , processes = Id.empty
+    , parts = Id.empty
     }
 
 
@@ -144,89 +143,28 @@ newPart : Project -> ( Id Part, Part )
 newPart p =
     let
         last =
-            Dict.values p.parts
+            Id.items p.parts
                 |> List.sortBy (.order >> negate)
                 |> List.head
                 |> Maybe.unwrap 0 .order
 
         try id name =
-            if Dict.member (String.fromInt id) p.parts then
+            if Id.member (Id.fromString <| String.fromInt id) p.parts then
                 try (id + 1) name
 
             else if
-                Dict.any
-                    (\_ part -> part.name == makePartName name)
+                Id.any
+                    (\part -> part.name == makePartName name)
                     p.parts
             then
                 try id (name + 1)
 
             else
-                ( Id <| String.fromInt id
+                ( Id.fromString <| String.fromInt id
                 , { name = makePartName name
                   , order = last + 1
                   , parent = Nothing
                   }
                 )
     in
-    try (Dict.size p.parts) (Dict.size p.parts)
-
-
-
--- Process
-
-
-type alias Process =
-    { name : String
-    , order : Float
-    , upstreams : List SomeId
-    }
-
-
-nullProcess : Process
-nullProcess =
-    { name = "Null Process", order = 0, upstreams = [] }
-
-
-processDesc : Desc Process
-processDesc =
-    Desc.object Process <|
-        Desc.field "name" .name Desc.string
-            >> Desc.field "order" .order Desc.float
-            >> Desc.field "upstreams" .upstreams (Desc.list Desc.string)
-
-
-defaultProcesses : List Process
-defaultProcesses =
-    [ { name = "脚本", order = 0, upstreams = [] }
-    , { name = "設定", order = 1, upstreams = [] }
-    , { name = "絵コンテ", order = 2, upstreams = [] }
-    , { name = "レイアウト", order = 3, upstreams = [] }
-    , { name = "作画", order = 4, upstreams = [] }
-    , { name = "彩色", order = 5, upstreams = [] }
-    , { name = "背景", order = 6, upstreams = [] }
-    , { name = "撮影", order = 7, upstreams = [] }
-    ]
-
-
-
--- Part
-
-
-type alias Part =
-    { name : String
-    , order : Float
-    , parent : Maybe SomeId
-    }
-
-
-nullPart : Part
-nullPart =
-    { name = "Null Part", order = 0, parent = Nothing }
-
-
-partDesc : Desc Part
-partDesc =
-    Desc.object Part <|
-        Desc.field "name" .name Desc.string
-            >> Desc.field "order" .order Desc.float
-            >> Desc.option "parent" .parent Desc.string
+    try (Id.size p.parts) (Id.size p.parts + 1)

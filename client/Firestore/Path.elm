@@ -1,17 +1,10 @@
 module Firestore.Path exposing (..)
 
 import Dict.Extra as Dict
+import Firestore.Path.Id exposing (..)
 import Json.Decode as Decode exposing (Decoder)
 import Json.Encode as Encode exposing (Value)
 import Maybe.Extra as Maybe
-
-
-type Id a
-    = Id String
-
-
-type alias SomeId =
-    String
 
 
 type Path
@@ -30,16 +23,6 @@ type Doc
     | SubCol SomeId Col
 
 
-coerce : Id a -> Id b
-coerce (Id str) =
-    Id str
-
-
-unId : Id a -> String
-unId (Id str) =
-    str
-
-
 root : Path
 root =
     Root
@@ -55,7 +38,7 @@ topLevel id =
     RootCol id Col
 
 
-getLast : Path -> Maybe SomeId
+getLast : Path -> Maybe (Id x)
 getLast p =
     let
         goCol col =
@@ -64,7 +47,7 @@ getLast p =
                     Nothing
 
                 SubDoc id doc ->
-                    Maybe.or (goDoc doc) (Just id)
+                    Maybe.or (goDoc doc) (Just <| Id id)
 
                 Query _ _ _ col_ ->
                     goCol col_
@@ -75,14 +58,14 @@ getLast p =
                     Nothing
 
                 SubCol id col ->
-                    Maybe.or (goCol col) (Just id)
+                    Maybe.or (goCol col) (Just <| Id id)
     in
     case p of
         Root ->
             Nothing
 
         RootCol id col ->
-            Maybe.or (goCol col) (Just id)
+            Maybe.or (goCol col) (Just <| Id id)
 
 
 fromIds : List SomeId -> Path

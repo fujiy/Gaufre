@@ -184,3 +184,13 @@ onChange : (String -> msg) -> Attribute msg
 onChange dec =
     Events.on "Change" <|
         Decode.map dec Events.targetValue
+
+
+onHide : msg -> Attribute msg
+onHide msg =
+    Events.on "hide" <| Decode.succeed msg
+
+
+onApprove : msg -> Attribute msg
+onApprove msg =
+    Events.on "approve" <| Decode.succeed msg

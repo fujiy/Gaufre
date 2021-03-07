@@ -3,7 +3,8 @@ module Firestore.Desc exposing (..)
 import Array exposing (Array)
 import Dict exposing (Dict)
 import Firestore.Internal exposing (..)
-import Firestore.Path as Path exposing (Id(..), Path, SomeId)
+import Firestore.Path as Path exposing (Path)
+import Firestore.Path.Id as Id exposing (Id(..), IdMap, SelfId)
 import Firestore.Path.Map as PathMap exposing (Paths)
 import Firestore.Remote as Remote exposing (Remote(..))
 import Json.Decode as Decode exposing (Decoder)
@@ -54,7 +55,7 @@ type FirestoreDesc r
 
 type CollectionDesc l r
     = CollectionDesc
-        { applier : Applier_ (Dict SomeId (PathMap.Col Value)) l r
+        { applier : Applier_ (IdMap r (PathMap.Col Value)) l r
         , empty : l
         }
 
@@ -84,7 +85,7 @@ firestore constr rf =
                     }
     in
     FirestoreDesc
-        { applier = \(PathMap.Root cpvs) cols -> c.applier cpvs cols
+        { applier = \pvs cols -> c.applier (PathMap.cols pvs) cols
         , empty = c.empty
         }
 
@@ -95,7 +96,7 @@ document constr =
 
 
 documentWithId :
-    (SomeId -> c)
+    (SelfId -> c)
     -> (Field c r -> Field r r)
     -> DocumentDesc () r
 documentWithId constr f =
@@ -113,7 +114,7 @@ documentWithSubs constr =
 
 
 documentWithIdAndSubs :
-    (SomeId -> rc)
+    (SelfId -> rc)
     -> (Field rc r -> Field r r)
     -> sc
     -> (CollectionDesc sc s -> CollectionDesc s s)
@@ -147,12 +148,12 @@ documentWithIdAndSubs rconstr rf sconstr sf =
                 (\did -> Remote.decode (fld did).decoder)
                 (Decode.field "id" Decode.string)
         , applier =
-            \(PathMap.Doc ma d) ->
-                if PathMap.isEmptyDoc <| PathMap.Doc ma d then
+            \pdv ->
+                if PathMap.isEmptyDoc pdv then
                     Ok
 
                 else
-                    cd.applier d
+                    cd.applier <| PathMap.subCols pdv
         , empty = cd.empty
         }
 
@@ -168,9 +169,9 @@ collection name getter (DocumentDesc d) (CollectionDesc c) =
         empty =
             c.empty <|
                 Collection
-                    { name = name
+                    { name = Id name
                     , empty = d.empty
-                    , docs = Dict.empty
+                    , docs = Id.empty
                     , q = Dict.empty
                     }
 
@@ -184,7 +185,7 @@ collection name getter (DocumentDesc d) (CollectionDesc c) =
                 -- (Collection col) =
                 --     getter r
                 cpv =
-                    Dict.get name cpvs
+                    Id.get (Id name) cpvs
                         |> Maybe.withDefault PathMap.emptyCol
             in
             Result.map2
@@ -195,7 +196,7 @@ collection name getter (DocumentDesc d) (CollectionDesc c) =
                     (\( did, dpv ) rd ->
                         let
                             (Document sub doc) =
-                                Dict.get did col.docs
+                                Id.get did col.docs
                                     |> Maybe.withDefault
                                         (Document d.empty Loading)
 
@@ -208,12 +209,12 @@ collection name getter (DocumentDesc d) (CollectionDesc c) =
                                         (Decode.decodeValue d.decoder)
                         in
                         Result.map2
-                            (Dict.insert did)
+                            (Id.insert did)
                             (Result.map2 Document sub_ doc_)
                             rd
                     )
                     (Ok col.docs)
-                    (PathMap.subDocs cpv |> Dict.toList)
+                    (PathMap.subDocs cpv |> Id.toList)
                 )
                 (List.foldr
                     (\qpv rq ->
@@ -225,21 +226,15 @@ collection name getter (DocumentDesc d) (CollectionDesc c) =
                                 Dict.get key col.q
                                     |> Maybe.withDefault
                                         (Collection
-                                            { name = name
+                                            { name = Id name
                                             , empty = d.empty
-                                            , docs = Dict.empty
+                                            , docs = Id.empty
                                             , q = Dict.empty
                                             }
                                         )
 
-                            -- qcol__ =
-                            --     PathMap.getColRoot qpv.q
-                            --         |> Maybe.unwrap (Ok qcol)
-                            --             (Decode.decodeValue d.decoder)
-                            -- qcol_ =
-                            --     Debug.todo ""
                             qcol_ =
-                                applier (Dict.singleton name qpv.col) qcol
+                                applier (Id.singleton (Id name) qpv.col) qcol
                         in
                         Result.map2 (Dict.insert key) qcol_ rq
                     )
@@ -333,6 +328,11 @@ request =
             , Decode.succeed None
             ]
         )
+
+
+idMap : Desc a -> Desc (IdMap x a)
+idMap desc =
+    map (Iso Id.fromDict Id.toDict) (dict desc)
 
 
 
