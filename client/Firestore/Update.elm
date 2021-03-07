@@ -116,7 +116,7 @@ delete :
     -> DocumentDesc s r
     -> Updater a msg
 delete (Lens l) (DocumentDesc d) =
-    l.update (Set <| d.encoder Failure) (Document d.empty Failure)
+    l.update Internal.Delete (Document d.empty Failure)
         |> fromDoc
 
 

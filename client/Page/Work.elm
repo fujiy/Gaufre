@@ -18,7 +18,7 @@ import Firestore.Remote exposing (Remote(..))
 import Firestore.Update as Update exposing (Updater)
 import GDrive exposing (FileMeta)
 import Html exposing (Html, button, div, img, input, label, node, text)
-import Html.Attributes exposing (attribute, class, hidden, placeholder, src, style, type_, value)
+import Html.Attributes exposing (attribute, class, hidden, href, placeholder, src, style, type_, value)
 import Html.Events as Events exposing (onClick, onDoubleClick, onInput)
 import Json.Decode as Decode
 import List.Extra as List
@@ -541,6 +541,13 @@ fileActions model =
             , onClick <| ModalState <| CreateFolderModal ""
             ]
             [ icon "folder open" ]
+        , Html.a
+            [ class "ui button"
+            , attribute "data-tooltip" "Google Drive で開く"
+            , attribute "data-position" "bottom center"
+            , href <| Maybe.unwrap "" .webViewLink model.folder
+            ]
+            [ icon "google drive" ]
         , button
             [ class "ui button"
             , classIf model.downloading "loading"

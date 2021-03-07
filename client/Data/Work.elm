@@ -222,7 +222,7 @@ partList parts work =
             work.belongsTo |> List.map unId
     in
     node "ui-dropdown"
-        [ class "ui mini multiple search selection dropdown select-all"
+        [ class "ui small multiple search selection dropdown select-all"
         , attribute "multiple" ""
         , attribute "value" <| String.join "," values
         , onChangeValues
@@ -242,7 +242,7 @@ partList parts work =
     <|
         [ input [ type_ "hidden", Attr.name "staffs" ] []
         , Html.i [ class "dropdown icon" ] []
-        , div [ class "default text" ] [ text "属するカット" ]
+        , div [ class "default text" ] [ text "カット" ]
         , div [ class "menu" ] <|
             List.map
                 (\( id, part ) ->

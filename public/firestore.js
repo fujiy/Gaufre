@@ -27,6 +27,14 @@ function initialize(app) {
     };
   }
 
+  function makeRemovedDoc(doc) {
+    return {
+      id: doc.id,
+      status: "failure",
+      value: null,
+    };
+  }
+
   function reference(rootPath) {
     function goCol(colPath, ref) {
       switch (colPath.type) {
@@ -116,18 +124,48 @@ function initialize(app) {
             includeMetadataChanges: true,
           },
           (querySnapshot) => {
+            if (
+              querySnapshot.metadata.hasPendingWrites ||
+              querySnapshot.metadata.fromCache
+            )
+              return;
+
             const map = { item: null, sub: [], q: [] };
-            querySnapshot.forEach((doc) => {
-              map.sub.push({ item: makeDoc(doc), sub: [], id: doc.id });
+            querySnapshot.docChanges().forEach((change) => {
+              switch (change.type) {
+                case "added":
+                case "modified":
+                  map.sub.push({
+                    item: makeDoc(change.doc),
+                    sub: [],
+                    id: change.doc.id,
+                  });
+                  break;
+                case "removed":
+                  map.sub.push({
+                    item: makeRemovedDoc(change.doc),
+                    sub: [],
+                    id: change.doc.id,
+                  });
+                  break;
+              }
             });
 
             const updates = builder(map);
             console.log("snapshots", showPathMap(updates));
 
-            if (!querySnapshot.metadata.hasPendingWrites)
-              sendSub({ updates: updates });
+            sendSub({ updates: updates });
+
+            tree._startingUp = false;
+            if (tree._unlisten && !doc.metadata.fromCache) {
+              tree._listener();
+              tree._listener = null;
+            }
           }
         );
+
+        tree._startingUp = true;
+        tree._unlisten = false;
       }
 
       for (const doc of colMap.sub) {
@@ -158,12 +196,23 @@ function initialize(app) {
         tree._listener = ref.onSnapshot(
           { includeMetadataChanges: true },
           (doc) => {
+            if (doc.metadata.hasPendingWrites || doc.metadata.fromCache) return;
+
             const updates = builder({ item: makeDoc(doc), sub: [] });
 
             console.log("snapshot", showPathMap(updates)[0]);
-            if (!doc.metadata.hasPendingWrites) sendSub({ updates: updates });
+
+            sendSub({ updates: updates });
+
+            tree._startingUp = false;
+            if (tree._unlisten && !doc.metadata.fromCache) {
+              tree._listener();
+              tree._listener = null;
+            }
           }
         );
+        tree._startingUp = true;
+        tree._unlisten = false;
       }
       for (const col of docMap.sub) {
         if (!tree[col.id]) tree[col.id] = {};
@@ -187,8 +236,12 @@ function initialize(app) {
     function goCol(colMap, tree) {
       if (!tree) return;
       if (colMap.item && tree._listener) {
-        tree._listener();
-        tree._listener = null;
+        if (tree._startingUp) {
+          tree._unlisten = true;
+        } else {
+          tree._listener();
+          tree._listener = null;
+        }
       }
 
       for (const doc of colMap.sub) {
@@ -201,8 +254,12 @@ function initialize(app) {
     function goDoc(docMap, tree) {
       if (!tree) return;
       if (docMap.item && tree._listener) {
-        tree._listener();
-        tree._listener = null;
+        if (tree._startingUp) {
+          tree._unlisten = true;
+        } else {
+          tree._listener();
+          tree._listener = null;
+        }
       }
 
       for (const col of docMap.sub) {
@@ -220,7 +277,7 @@ function initialize(app) {
       if (colMap.item) {
         switch (colMap.item.type) {
           case "add":
-            ref.set(encode(colMap.item.value.value));
+            ref.add(encode(colMap.item.value.value));
             break;
         }
       }
@@ -240,7 +297,7 @@ function initialize(app) {
             ref.set(encode(docMap.item.value.value));
             break;
           case "delete":
-            ref.set(encode(docMap.item.value.value));
+            ref.delete();
             break;
         }
       }
@@ -314,7 +371,6 @@ function initialize(app) {
     app.ports.firestoreCmdPort.subscribe((v) => {
       console.log(
         "command",
-        v,
         showPathMap(v.listen),
         showPathMap(v.unlisten),
         showPathMap(v.updates)

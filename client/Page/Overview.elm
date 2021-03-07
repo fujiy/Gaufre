@@ -18,6 +18,7 @@ import GDrive exposing (FileMeta)
 import Html exposing (Html, button, div, input, label, node, table, tbody, td, text, th, thead, tr)
 import Html.Attributes exposing (attribute, checked, class, colspan, placeholder, rowspan, style, type_, value)
 import Html.Events exposing (onCheck, onClick, onDoubleClick, onInput)
+import Html.Keyed as Keyed
 import List.Extra as List
 import Maybe.Extra as Maybe
 import Result.Extra as Result
@@ -37,6 +38,8 @@ type Modal
     = Hidden
     | AddPartModal (IdMap Process ( Process, Bool )) (Id Part) Part
     | AddWorkModal (Id Process) (Id Part) String
+    | WorkSettingModal (Id Work)
+    | DeleteWorkModal (Id Work)
 
 
 init : Model
@@ -56,6 +59,7 @@ type Msg
     | SetWorkStaffs (List Work) (List (Id User))
     | SetWorkReviewers (List Work) (List (Id User))
     | SetWorkBelongsTo Work (List (Id Part))
+    | DeleteWork (Id Work)
 
 
 update :
@@ -193,6 +197,21 @@ update auth msg m model =
                 \work -> { work | belongsTo = parts }
             )
 
+        DeleteWork workId ->
+            ( model
+            , Update.all
+                [ Update.delete
+                    (o projectLens <| Project.work workId)
+                    Work.desc
+                , Update.command <|
+                    \_ ->
+                        GDrive.files_update auth.token
+                            (unId workId)
+                            { gdriveUpdate | trashed = Just True }
+                            |> Cmd.map (\_ -> None)
+                ]
+            )
+
         None ->
             ( model, Update.none )
 
@@ -241,6 +260,20 @@ view auth model data project =
 
                 partIds =
                     List.map Tuple.first parts
+
+                addPartButton =
+                    if Project.authority role |> .editStructure then
+                        [ ( "-1"
+                          , tr []
+                                [ td
+                                    [ colspan <| List.length processes ]
+                                    [ Button.add <| addPart project ]
+                                ]
+                          )
+                        ]
+
+                    else
+                        []
             in
             div
                 [ class "ui grid"
@@ -256,30 +289,25 @@ view auth model data project =
                     , onMouseDownStop ClearSelection
                     ]
                     [ thead [] [ tableHeader model processes ]
-                    , tbody [] <|
+                    , Keyed.node "tbody" [] <|
                         List.map
-                            (tableRow auth
-                                model
-                                project
-                                partIds
-                                processes
-                                works
+                            (\( partId, part ) ->
+                                ( unId partId
+                                , tableRow auth
+                                    model
+                                    project
+                                    partIds
+                                    processes
+                                    works
+                                    partId
+                                    part
+                                )
                             )
                             parts
-                            ++ (if Project.authority role |> .editStructure then
-                                    [ tr []
-                                        [ td
-                                            [ colspan <| List.length processes ]
-                                            [ Button.add <| addPart project ]
-                                        ]
-                                    ]
-
-                                else
-                                    []
-                               )
+                            ++ addPartButton
                     ]
-                , actions model project role members works works_
-                , modalView model
+                , actions model role members works_
+                , modalView model project works works_
                 ]
 
 
@@ -314,15 +342,17 @@ tableRow :
     -> List (Id Part)
     -> List ( Id Process, Process )
     -> IdMap Process (IdMap Part Work)
-    -> ( Id Part, Part )
+    -> Id Part
+    -> Part
     -> Html Msg
-tableRow auth model project partIds processes works ( partId, part ) =
+tableRow auth model project partIds processes works partId part =
     let
         selected =
             Set.member (unId partId) model.selection
     in
-    tr [] <|
-        td
+    Keyed.node "tr" [] <|
+        ( "0"
+        , td
             [ class "selectable right aligned"
             , classIf selected "active"
             , style "padding" "5px"
@@ -331,6 +361,7 @@ tableRow auth model project partIds processes works ( partId, part ) =
             , onDragEnter <| Select (unId partId) (not selected) False
             ]
             [ text part.name ]
+        )
             :: List.map
                 (\( processId, process ) ->
                     let
@@ -338,7 +369,8 @@ tableRow auth model project partIds processes works ( partId, part ) =
                             Id.get processId works
                                 |> Maybe.withDefault Id.empty
                     in
-                    Id.get partId parts
+                    ( unId processId ++ unId partId
+                    , Id.get partId parts
                         |> Maybe.unwrap
                             (emptyCell (Data.myRole project auth)
                                 processId
@@ -346,6 +378,7 @@ tableRow auth model project partIds processes works ( partId, part ) =
                                 part
                             )
                             (workCell model partIds process partId part)
+                    )
                 )
                 processes
 
@@ -454,13 +487,11 @@ partRowSpan ps partId work =
 
 actions :
     Model
-    -> Project
     -> Project.Role
     -> List User
-    -> IdMap Process (IdMap Part Work)
     -> List Work
     -> Html Msg
-actions model project role members workMap works =
+actions model role members works =
     let
         selection =
             List.filter (isSelected model.selection) works
@@ -492,7 +523,21 @@ actions model project role members workMap works =
 
         else
             [ div [ class "content" ]
-                [ div [ class "header" ]
+                [ when authority.editStructure <|
+                    case selection of
+                        [ work ] ->
+                            button
+                                [ class "ui right floated circular icon button"
+                                , onClick <|
+                                    ModalState <|
+                                        WorkSettingModal <|
+                                            Id.self work
+                                ]
+                                [ icon "cog" ]
+
+                        _ ->
+                            text ""
+                , div [ class "header" ]
                     [ case selection of
                         [ work ] ->
                             text work.name
@@ -527,34 +572,6 @@ actions model project role members workMap works =
                 ]
             , div [ class "content" ]
                 [ div [ class "header" ] [ text "スケジュール" ] ]
-            , when authority.editStructure <|
-                div [ class "content" ]
-                    [ div [ class "header" ] [ text "設定" ]
-                    , Html.p [] <|
-                        case selection of
-                            [ work ] ->
-                                let
-                                    parts =
-                                        Id.get work.process workMap
-                                            |> Maybe.withDefault Id.empty
-
-                                    choices =
-                                        Id.filter
-                                            (\id _ ->
-                                                not (Id.member id parts)
-                                                    || List.member id
-                                                        work.belongsTo
-                                            )
-                                            project.parts
-                                in
-                                [ text "含むカット："
-                                , Work.partList choices work
-                                    |> Html.map (SetWorkBelongsTo work)
-                                ]
-
-                            _ ->
-                                []
-                    ]
             ]
 
 
@@ -570,8 +587,13 @@ addPart project =
     ModalState <| AddPartModal processes newId newPart
 
 
-modalView : Model -> Html Msg
-modalView model =
+modalView :
+    Model
+    -> Project
+    -> IdMap Process (IdMap Part Work)
+    -> List Work
+    -> Html Msg
+modalView model project workMap works =
     node "ui-modal"
         [ class "ui small modal"
         , boolAttr "show" <| model.modal /= Hidden
@@ -596,9 +618,14 @@ modalView model =
                 AddWorkModal processId partId name ->
                     AddWork processId partId name
 
+                WorkSettingModal _ ->
+                    None
+
+                DeleteWorkModal work ->
+                    DeleteWork work
+
                 Hidden ->
                     None
-        , attribute "not-hide" "true"
         ]
     <|
         case model.modal of
@@ -653,8 +680,8 @@ modalView model =
                                     ]
                     ]
                 , div [ class "actions" ]
-                    [ div [ class "ui deny button" ] [ text "完了" ]
-                    , div
+                    [ button [ class "ui deny button" ] [ text "キャンセル" ]
+                    , button
                         [ class "ui positive button"
                         , classIf (part.name == "") "disabled"
                         ]
@@ -682,13 +709,78 @@ modalView model =
                     ]
                 , div [ class "actions" ]
                     [ div [ class "ui deny button" ] [ text "キャンセル" ]
-                    , div
+                    , button
                         [ class "ui positive button"
                         , classIf (name == "") "disabled"
                         ]
                         [ text "追加" ]
                     ]
                 ]
+
+            WorkSettingModal workId ->
+                case List.find (Id.self >> (==) workId) works of
+                    Just work ->
+                        [ div [ class "header" ]
+                            [ text <| work.name ++ " の設定" ]
+                        , div [ class "content" ] <|
+                            let
+                                parts =
+                                    Id.get work.process workMap
+                                        |> Maybe.withDefault Id.empty
+
+                                choices =
+                                    Id.filter
+                                        (\id _ ->
+                                            not (Id.member id parts)
+                                                || List.member id
+                                                    work.belongsTo
+                                        )
+                                        project.parts
+                            in
+                            [ text "含まれるカット："
+                            , Work.partList choices work
+                                |> Html.map (SetWorkBelongsTo work)
+                            ]
+                        , div [ class "content" ] <|
+                            [ button
+                                [ class "ui negative button"
+                                , onClick <|
+                                    ModalState <|
+                                        DeleteWorkModal workId
+                                ]
+                                [ text "作業を削除" ]
+                            ]
+                        , div [ class "actions" ]
+                            [ button [ class "ui positive button" ]
+                                [ text "完了" ]
+                            ]
+                        ]
+
+                    _ ->
+                        []
+
+            DeleteWorkModal workId ->
+                case List.find (Id.self >> (==) workId) works of
+                    Just work ->
+                        [ div [ class "ui icon header" ]
+                            [ icon "trash alternate outline"
+                            , text <| work.name ++ " を削除"
+                            ]
+                        , div [ class "content" ]
+                            [ Html.p [] [ text "本当に削除しますか？" ] ]
+                        , div [ class "actions" ]
+                            [ button
+                                [ class "ui negative button"
+                                , onClick <| DeleteWork workId
+                                ]
+                                [ text "削除" ]
+                            , button [ class "ui deny button" ]
+                                [ text "キャンセル" ]
+                            ]
+                        ]
+
+                    _ ->
+                        []
 
             Hidden ->
                 []
@@ -780,3 +872,8 @@ gatherList getter =
         )
         { all = Dict.empty, partially = Dict.empty, notAll = False }
         >> (\r -> { all = r.all, partially = r.partially })
+
+
+gdriveUpdate : GDrive.Update
+gdriveUpdate =
+    GDrive.update
