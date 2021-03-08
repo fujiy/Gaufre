@@ -1,12 +1,15 @@
 module Data.Work exposing (..)
 
-import Data.User as User exposing (User)
+import Data.User as User
 import Firestore exposing (..)
 import Firestore.Desc as Desc exposing (Desc, DocumentDesc)
-import Firestore.Path.Id as Id exposing (Id, IdMap, SelfId, SomeId, unId)
-import Html exposing (Html, a, div, img, input, node, span, text)
-import Html.Attributes as Attr exposing (attribute, class, src, type_)
-import Util exposing (icon, onChangeValues)
+import Firestore.Path.Id as Id exposing (Id, SelfId, unId)
+import Firestore.Path.Id.Map as IdMap
+import Firestore.Path.Id.Set as IdSet
+import Html exposing (Html, div, input, node, span, text)
+import Html.Attributes as Attr exposing (attribute, class, type_)
+import List.Extra as List
+import Util exposing (boolAttr, flip, icon, onChangeValues)
 
 
 type Status
@@ -24,11 +27,16 @@ type alias Work =
     , belongsTo : List (Id Part)
     , staffs : List User.Reference
     , reviewers : List User.Reference
+    , waitingFor : List Ref
     }
 
 
 type alias Reference =
     Firestore.Reference () Work
+
+
+type Ref
+    = Ref Reference
 
 
 type alias Collection =
@@ -47,6 +55,7 @@ init id name processId partId =
     , belongsTo = [ partId ]
     , staffs = []
     , reviewers = []
+    , waitingFor = []
     }
 
 
@@ -58,19 +67,41 @@ desc =
             >> Desc.field "belongsTo" .belongsTo (Desc.list Desc.id)
             >> Desc.field "staffs" .staffs (Desc.list Desc.reference)
             >> Desc.field "reviewers" .reviewers (Desc.list Desc.reference)
+            >> Desc.optionWithDefault "waitingFor"
+                .waitingFor
+                []
+                (Desc.list <|
+                    Desc.map (Desc.iso Ref (\(Ref r) -> r)) Desc.reference
+                )
 
 
+title : IdMap.Map Process Process -> IdMap.Map Part Part -> Work -> String
+title processes parts work =
+    let
+        process =
+            IdMap.get work.process processes
+                |> Maybe.withDefault nullProcess
 
--- >> Desc.field "status"
---     .status
---     (Desc.enum
---         [ ( "NotAssigned", NotAssigned )
---         , ( "Waiting", Waiting )
---         , ( "InProgress", InProgress )
---         , ( "Reviewing", Reviewing )
---         , ( "Complete", Complete )
---         ]
---     )
+        belongsTo =
+            List.filterMap (flip IdMap.get parts) work.belongsTo
+
+        part =
+            List.minimumBy .order belongsTo
+                |> Maybe.withDefault nullPart
+
+        maxPart =
+            List.maximumBy .order belongsTo
+                |> Maybe.withDefault nullPart
+    in
+    if List.length belongsTo == 1 then
+        part.name ++ "：" ++ process.name
+
+    else
+        part.name
+            ++ " 〜 "
+            ++ maxPart.name
+            ++ "："
+            ++ process.name
 
 
 getStatus : Work -> Status
@@ -147,11 +178,6 @@ statusNumber status =
 
 
 
--- div [ class "ui icon mini message", class cls ]
---     [ icon <| iconClass status
---     , div [ class "content" ]
---         [ div [ class "header" ] [ text header ] ]
---     ]
 -- Process
 
 
@@ -188,6 +214,36 @@ defaultProcesses =
     ]
 
 
+processList :
+    IdMap.Map Process Process
+    -> List (Id Process)
+    -> Html (List (Id Process))
+processList processs ids =
+    node "ui-dropdown"
+        [ class "ui small multiple search selection dropdown select-all"
+        , attribute "multiple" ""
+        , attribute "value" <| String.join "," <| List.map unId ids
+        , onChangeValues |> Attr.map (List.map Id.fromString)
+        ]
+    <|
+        [ input [ type_ "hidden", Attr.name "staffs" ] []
+        , Html.i [ class "dropdown icon" ] []
+        , div [ class "default text" ] [ text "工程" ]
+        , div [ class "menu" ] <|
+            List.map
+                (\( id, process ) ->
+                    div
+                        [ class "item"
+                        , attribute "data-value" <| unId id
+                        ]
+                    <|
+                        [ span [] [ text process.name ] ]
+                )
+            <|
+                IdMap.toList processs
+        ]
+
+
 
 -- Part
 
@@ -213,7 +269,7 @@ partDesc =
 
 
 partList :
-    IdMap Part Part
+    IdMap.Map Part Part
     -> Work
     -> Html (List (Id Part))
 partList parts work =
@@ -254,5 +310,81 @@ partList parts work =
                         [ span [] [ text part.name ] ]
                 )
             <|
-                Id.toList parts
+                IdMap.toList parts
         ]
+
+
+
+-- Selection
+
+
+type alias Selection =
+    { works : IdSet.Set Work
+    , processes : IdSet.Set Process
+    , parts : IdSet.Set Part
+    }
+
+
+isSelected : Selection -> Work -> Bool
+isSelected selection work_ =
+    IdSet.member (Id.self work_) selection.works
+        || IdSet.member work_.process selection.processes
+        || List.any (\partId -> IdSet.member partId selection.parts)
+            work_.belongsTo
+
+
+selectionTitle :
+    IdMap.Map Process Process
+    -> IdMap.Map Part Part
+    -> List Work
+    -> Selection
+    -> String
+selectionTitle processes parts works_ selection =
+    Maybe.withDefault "" <|
+        case IdSet.toList selection.processes of
+            [] ->
+                case IdSet.toList selection.parts of
+                    [] ->
+                        case IdSet.toList selection.works of
+                            [] ->
+                                Nothing
+
+                            [ id ] ->
+                                List.find (Id.self >> (==) id) works_
+                                    |> Maybe.map (title processes parts)
+
+                            ids ->
+                                let
+                                    n =
+                                        String.fromInt <| List.length ids
+                                in
+                                Just <| n ++ "件の作業"
+
+                    [ id ] ->
+                        IdMap.get id parts |> Maybe.map .name
+
+                    ids ->
+                        let
+                            selecteds =
+                                List.filterMap
+                                    (flip IdMap.get parts)
+                                    ids
+                        in
+                        Maybe.map2
+                            (\min max -> min.name ++ " 〜 " ++ max.name)
+                            (List.minimumBy .order selecteds)
+                            (List.maximumBy .order selecteds)
+
+            [ id ] ->
+                IdMap.get id processes
+                    |> Maybe.map .name
+
+            ids ->
+                let
+                    selecteds =
+                        List.filterMap (flip IdMap.get processes) ids
+                in
+                Maybe.map2
+                    (\min max -> min.name ++ " 〜 " ++ max.name)
+                    (List.minimumBy .order selecteds)
+                    (List.maximumBy .order selecteds)

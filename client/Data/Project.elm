@@ -4,9 +4,11 @@ import Data.User as User
 import Data.Work as Work exposing (Part, Process, Work)
 import Dict.Extra as Dict
 import Firestore exposing (..)
-import Firestore.Desc as Desc exposing (Desc, DocumentDesc)
+import Firestore.Desc as Desc exposing (DocumentDesc)
 import Firestore.Lens as Lens exposing (o)
-import Firestore.Path.Id as Id exposing (Id, IdMap, SelfId)
+import Firestore.Path.Id as Id exposing (Id, SelfId)
+import Firestore.Path.Id.Map as IdMap
+import Firestore.Path.Id.Set as IdSet
 import GDrive
 import Maybe.Extra as Maybe
 
@@ -17,8 +19,8 @@ type alias Project =
     , members : List User.Reference
     , admins : List User.Reference
     , owner : User.Reference
-    , processes : IdMap Process Process
-    , parts : IdMap Part Part
+    , processes : IdMap.Map Process Process
+    , parts : IdMap.Map Part Part
     }
 
 
@@ -129,8 +131,8 @@ init file user =
     , members = [ user ]
     , admins = [ user ]
     , owner = user
-    , processes = Id.empty
-    , parts = Id.empty
+    , processes = IdMap.empty
+    , parts = IdMap.empty
     }
 
 
@@ -143,17 +145,17 @@ newPart : Project -> ( Id Part, Part )
 newPart p =
     let
         last =
-            Id.items p.parts
+            IdMap.items p.parts
                 |> List.sortBy (.order >> negate)
                 |> List.head
                 |> Maybe.unwrap 0 .order
 
         try id name =
-            if Id.member (Id.fromString <| String.fromInt id) p.parts then
+            if IdMap.member (Id.fromString <| String.fromInt id) p.parts then
                 try (id + 1) name
 
             else if
-                Id.any
+                IdMap.any
                     (\part -> part.name == makePartName name)
                     p.parts
             then
@@ -167,4 +169,4 @@ newPart p =
                   }
                 )
     in
-    try (Id.size p.parts) (Id.size p.parts + 1)
+    try (IdMap.size p.parts) (IdMap.size p.parts + 1)

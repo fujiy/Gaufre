@@ -10,6 +10,7 @@ class UIModal extends HTMLElement {
         $(this)
           .modal({
             detachable: false,
+            autofocus: !this.getAttribute("noautofocus"),
             onHide: () => {
               if (this.getAttribute("not-hide")) return false;
               this.dispatchEvent(new Event("hide"));

@@ -12,6 +12,7 @@ import Firestore.Access as Access exposing (Accessor)
 import Firestore.Lens as Lens exposing (o)
 import Firestore.Path as Path
 import Firestore.Path.Id as Id exposing (Id)
+import Firestore.Path.Id.Map as IdMap
 import Firestore.Remote as Remote exposing (Remote(..))
 import Firestore.Update as Update exposing (Updater)
 import GDrive
@@ -167,7 +168,7 @@ update auth msg model =
                 \project ->
                     { project
                         | processes =
-                            Id.insert (Id.fromString file.id)
+                            IdMap.insert (Id.fromString file.id)
                                 process
                                 project.processes
                     }

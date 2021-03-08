@@ -11,12 +11,14 @@ import Firestore exposing (Id)
 import Firestore.Access as Access exposing (Accessor)
 import Firestore.Lens as Lens exposing (o)
 import Firestore.Path as Path
-import Firestore.Path.Id as Id exposing (Id(..), IdMap, SomeId, unId)
+import Firestore.Path.Id as Id exposing (Id(..), unId)
+import Firestore.Path.Id.Map as IdMap
+import Firestore.Path.Id.Set as IdSet
 import Firestore.Remote exposing (Remote(..))
 import Firestore.Update as Update exposing (Updater)
 import GDrive exposing (FileMeta)
-import Html exposing (Html, button, div, input, label, node, table, tbody, td, text, th, thead, tr)
-import Html.Attributes exposing (attribute, checked, class, colspan, placeholder, rowspan, style, type_, value)
+import Html exposing (Html, button, div, input, label, node, table, td, text, th, thead, tr)
+import Html.Attributes exposing (checked, class, colspan, placeholder, rowspan, style, type_, value)
 import Html.Events exposing (onCheck, onClick, onDoubleClick, onInput)
 import Html.Keyed as Keyed
 import List.Extra as List
@@ -29,29 +31,38 @@ import View.Button as Button
 
 
 type alias Model =
-    { selection : Set SomeId
+    { selection : Work.Selection
     , modal : Modal
     }
 
 
 type Modal
     = Hidden
-    | AddPartModal (IdMap Process ( Process, Bool )) (Id Part) Part
+    | AddPartModal (IdMap.Map Process ( Process, Bool )) (Id Part) Part
     | AddWorkModal (Id Process) (Id Part) String
+    | ProcessSettingModal (Id Process)
+      -- | PartSettingModal (Id Part)
     | WorkSettingModal (Id Work)
     | DeleteWorkModal (Id Work)
 
 
 init : Model
 init =
-    { selection = Set.empty, modal = Hidden }
+    { selection = noSelection, modal = Hidden }
+
+
+noSelection : Work.Selection
+noSelection =
+    Work.Selection IdSet.empty IdSet.empty IdSet.empty
 
 
 type Msg
     = None
     | ModalState Modal
     | MoveToWork Process Part Work
-    | Select SomeId Bool Bool
+    | SelectWork (Id Work) Bool Bool
+    | SelectProcess (Id Process) Bool Bool
+    | SelectPart (Id Part) Bool Bool
     | ClearSelection
     | AddPart (List (Id Process)) (Id Part) Part
     | AddWork (Id Process) (Id Part) String
@@ -60,6 +71,7 @@ type Msg
     | SetWorkReviewers (List Work) (List (Id User))
     | SetWorkBelongsTo Work (List (Id Part))
     | DeleteWork (Id Work)
+    | SetProcessUpstreams (Id Process) (List (Id Process))
 
 
 update :
@@ -92,28 +104,41 @@ update auth msg m model =
                             [ Url.string "work" work.id ]
             )
 
-        Select workId select clear ->
+        SelectWork id select clear ->
             ( { model
                 | selection =
-                    (if select then
-                        Set.insert
+                    { noSelection
+                        | works =
+                            IdSet.change id select clear model.selection.works
+                    }
+              }
+            , Update.none
+            )
 
-                     else
-                        Set.remove
-                    )
-                        workId
-                        (if clear then
-                            Set.empty
+        SelectProcess id select clear ->
+            ( { model
+                | selection =
+                    { noSelection
+                        | processes =
+                            IdSet.change id select clear model.selection.processes
+                    }
+              }
+            , Update.none
+            )
 
-                         else
-                            model.selection
-                        )
+        SelectPart id select clear ->
+            ( { model
+                | selection =
+                    { noSelection
+                        | parts =
+                            IdSet.change id select clear model.selection.parts
+                    }
               }
             , Update.none
             )
 
         ClearSelection ->
-            ( { model | selection = Set.empty }
+            ( { model | selection = noSelection }
             , Update.none
             )
 
@@ -121,7 +146,7 @@ update auth msg m model =
             ( model
             , Update.all
                 [ Update.modify projectLens Project.desc <|
-                    \p -> { p | parts = Id.insert newId newPart p.parts }
+                    \p -> { p | parts = IdMap.insert newId newPart p.parts }
                 , List.map
                     (\processId _ ->
                         GDrive.createFolder auth.token
@@ -212,6 +237,23 @@ update auth msg m model =
                 ]
             )
 
+        SetProcessUpstreams processId upstreams ->
+            ( model
+            , Update.modify projectLens Project.desc <|
+                \project ->
+                    { project
+                        | processes =
+                            IdMap.modify processId
+                                (\process ->
+                                    { process
+                                        | upstreams =
+                                            List.map unId upstreams
+                                    }
+                                )
+                                project.processes
+                    }
+            )
+
         None ->
             ( model, Update.none )
 
@@ -228,11 +270,11 @@ view : Auth -> Model -> Data -> Project -> Accessor Data (Html Msg)
 view auth model data project =
     let
         processes =
-            Id.toList project.processes
+            IdMap.toList project.processes
                 |> List.sortBy (\( _, p ) -> p.order)
 
         parts =
-            Id.toList project.parts
+            IdMap.toList project.parts
                 |> List.sortBy (\( _, p ) -> p.order)
     in
     flip2 Access.map2
@@ -255,8 +297,8 @@ view auth model data project =
                                 work.belongsTo
                         )
                         works_
-                        |> Id.groupBy Tuple.first
-                        |> Id.map (List.map Tuple.second >> Id.fromList)
+                        |> IdMap.groupBy Tuple.first
+                        |> IdMap.map (List.map Tuple.second >> IdMap.fromList)
 
                 partIds =
                     List.map Tuple.first parts
@@ -306,7 +348,7 @@ view auth model data project =
                             parts
                             ++ addPartButton
                     ]
-                , actions model role members works_
+                , actions model project role members works_
                 , modalView model project works works_
                 ]
 
@@ -319,16 +361,16 @@ tableHeader model processes =
                 (\( id, process ) ->
                     let
                         selected =
-                            Set.member (unId id) model.selection
+                            IdSet.member id model.selection.processes
                     in
                     th
                         [ class "selectable collapsing"
                         , classIf selected "active"
                         , style "cursor" "pointer"
                         , onMouseDownStop <|
-                            Select (unId id) (not selected) True
+                            SelectProcess id (not selected) True
                         , onDragEnter <|
-                            Select (unId id) (not selected) False
+                            SelectProcess id (not selected) False
                         ]
                         [ text process.name ]
                 )
@@ -341,14 +383,14 @@ tableRow :
     -> Project
     -> List (Id Part)
     -> List ( Id Process, Process )
-    -> IdMap Process (IdMap Part Work)
+    -> IdMap.Map Process (IdMap.Map Part Work)
     -> Id Part
     -> Part
     -> Html Msg
 tableRow auth model project partIds processes works partId part =
     let
         selected =
-            Set.member (unId partId) model.selection
+            IdSet.member partId model.selection.parts
     in
     Keyed.node "tr" [] <|
         ( "0"
@@ -357,8 +399,8 @@ tableRow auth model project partIds processes works partId part =
             , classIf selected "active"
             , style "padding" "5px"
             , style "cursor" "pointer"
-            , onMouseDownStop <| Select (unId partId) (not selected) True
-            , onDragEnter <| Select (unId partId) (not selected) False
+            , onMouseDownStop <| SelectPart partId (not selected) True
+            , onDragEnter <| SelectPart partId (not selected) False
             ]
             [ text part.name ]
         )
@@ -366,11 +408,11 @@ tableRow auth model project partIds processes works partId part =
                 (\( processId, process ) ->
                     let
                         parts =
-                            Id.get processId works
-                                |> Maybe.withDefault Id.empty
+                            IdMap.get processId works
+                                |> Maybe.withDefault IdMap.empty
                     in
                     ( unId processId ++ unId partId
-                    , Id.get partId parts
+                    , IdMap.get partId parts
                         |> Maybe.unwrap
                             (emptyCell (Data.myRole project auth)
                                 processId
@@ -410,10 +452,10 @@ workCell :
 workCell model partIds process partId part work =
     let
         selected =
-            isSelected model.selection work
+            Work.isSelected model.selection work
 
         selectedOnly =
-            model.selection == Set.singleton work.id
+            model.selection.works == IdSet.singleton (Id.self work)
     in
     case partRowSpan partIds partId work of
         0 ->
@@ -425,8 +467,9 @@ workCell model partIds process partId part work =
                 , classIf selected "active"
                 , style "cursor" "pointer"
                 , rowspan n
-                , onMouseDownStop <| Select work.id (not selectedOnly) True
-                , onDragEnter <| Select work.id (not selected) False
+                , onMouseDownStop <|
+                    SelectWork (Id.self work) (not selectedOnly) True
+                , onDragEnter <| SelectWork (Id.self work) (not selected) False
                 , onDoubleClick <| MoveToWork process part work
                 ]
                 [ icon <| Work.iconClass <| Work.getStatus work ]
@@ -436,8 +479,7 @@ partRowSpan : List (Id Part) -> Id Part -> Work -> Int
 partRowSpan ps partId work =
     let
         workParts =
-            List.map unId work.belongsTo
-                |> Set.fromList
+            work.belongsTo |> IdSet.fromList
 
         goBefore parts =
             case parts of
@@ -445,7 +487,7 @@ partRowSpan ps partId work =
                     0
 
                 id :: parts_ ->
-                    if Set.member (unId id) workParts then
+                    if IdSet.member id workParts then
                         if id == partId then
                             goAfter parts_
 
@@ -464,7 +506,7 @@ partRowSpan ps partId work =
                     if id == partId then
                         0
 
-                    else if Set.member (unId id) workParts then
+                    else if IdSet.member id workParts then
                         goSkip parts_
 
                     else
@@ -476,7 +518,7 @@ partRowSpan ps partId work =
                     1
 
                 id :: parts_ ->
-                    if Set.member (unId id) workParts then
+                    if IdSet.member id workParts then
                         goAfter parts_ + 1
 
                     else
@@ -487,14 +529,15 @@ partRowSpan ps partId work =
 
 actions :
     Model
+    -> Project
     -> Project.Role
     -> List User
     -> List Work
     -> Html Msg
-actions model role members works =
+actions model project role members works =
     let
         selection =
-            List.filter (isSelected model.selection) works
+            List.filter (Work.isSelected model.selection) works
 
         staffs =
             gatherList (.staffs >> List.map (Firestore.getId >> unId))
@@ -524,32 +567,42 @@ actions model role members works =
         else
             [ div [ class "content" ]
                 [ when authority.editStructure <|
-                    case selection of
-                        [ work ] ->
+                    case
+                        ( selection
+                        , IdSet.toList model.selection.processes
+                        , IdSet.toList model.selection.parts
+                        )
+                    of
+                        ( [ work ], _, _ ) ->
                             button
                                 [ class "ui right floated circular icon button"
                                 , onClick <|
-                                    ModalState <|
-                                        WorkSettingModal <|
-                                            Id.self work
+                                    ModalState
+                                        (WorkSettingModal <| Id.self work)
+                                ]
+                                [ icon "cog" ]
+
+                        ( _, [ processId ], _ ) ->
+                            button
+                                [ class "ui right floated circular icon button"
+                                , onClick <|
+                                    ModalState
+                                        (ProcessSettingModal processId)
                                 ]
                                 [ icon "cog" ]
 
                         _ ->
                             text ""
                 , div [ class "header" ]
-                    [ case selection of
-                        [ work ] ->
-                            text work.name
-
-                        _ ->
-                            text <|
-                                String.fromInt (List.length selection)
-                                    ++ "件の作業"
-                    , div [ class "meta" ] []
-                    , div [ class "description" ] <|
-                        List.map Work.statusLabel status
+                    [ text <|
+                        Work.selectionTitle
+                            project.processes
+                            project.parts
+                            works
+                            model.selection
                     ]
+                , div [ class "description" ] <|
+                    List.map Work.statusLabel status
                 ]
             , div [ class "content" ]
                 [ div [ class "header" ] [ text "メンバー" ]
@@ -582,7 +635,7 @@ addPart project =
             Project.newPart project
 
         processes =
-            flip Id.map project.processes <| \process -> ( process, True )
+            flip IdMap.map project.processes <| \process -> ( process, True )
     in
     ModalState <| AddPartModal processes newId newPart
 
@@ -590,19 +643,20 @@ addPart project =
 modalView :
     Model
     -> Project
-    -> IdMap Process (IdMap Part Work)
+    -> IdMap.Map Process (IdMap.Map Part Work)
     -> List Work
     -> Html Msg
 modalView model project workMap works =
     node "ui-modal"
         [ class "ui small modal"
         , boolAttr "show" <| model.modal /= Hidden
+        , boolAttr "noautofocus" True
         , onHide <| ModalState Hidden
         , onApprove <|
             case model.modal of
                 AddPartModal processes newId newPart ->
                     AddPart
-                        (Id.toList processes
+                        (IdMap.toList processes
                             |> List.filterMap
                                 (\( id, ( _, add ) ) ->
                                     if add then
@@ -618,13 +672,10 @@ modalView model project workMap works =
                 AddWorkModal processId partId name ->
                     AddWork processId partId name
 
-                WorkSettingModal _ ->
-                    None
-
                 DeleteWorkModal work ->
                     DeleteWork work
 
-                Hidden ->
+                _ ->
                     None
         ]
     <|
@@ -632,13 +683,13 @@ modalView model project workMap works =
             AddPartModal processes id part ->
                 let
                     processList =
-                        Id.toList processes
+                        IdMap.toList processes
                             |> List.sortBy (\( _, ( p, _ ) ) -> p.order)
 
                     checkProcess processId check =
                         ModalState <|
                             AddPartModal
-                                (Id.modify processId
+                                (IdMap.modify processId
                                     (\( p, _ ) -> ( p, check ))
                                     processes
                                 )
@@ -717,21 +768,45 @@ modalView model project workMap works =
                     ]
                 ]
 
+            ProcessSettingModal processId ->
+                case IdMap.get processId project.processes of
+                    Just process ->
+                        [ div [ class "header" ]
+                            [ text <| process.name ++ " の設定" ]
+                        , div [ class "content" ] <|
+                            [ text "前の工程："
+                            , Work.processList project.processes
+                                (List.map Id.selfId process.upstreams)
+                                |> Html.map (SetProcessUpstreams processId)
+                            ]
+                        , div [ class "actions" ]
+                            [ button [ class "ui positive button" ]
+                                [ text "完了" ]
+                            ]
+                        ]
+
+                    Nothing ->
+                        []
+
             WorkSettingModal workId ->
                 case List.find (Id.self >> (==) workId) works of
                     Just work ->
+                        let
+                            title =
+                                Work.title project.processes project.parts work
+                        in
                         [ div [ class "header" ]
-                            [ text <| work.name ++ " の設定" ]
+                            [ text <| title ++ " の設定" ]
                         , div [ class "content" ] <|
                             let
                                 parts =
-                                    Id.get work.process workMap
-                                        |> Maybe.withDefault Id.empty
+                                    IdMap.get work.process workMap
+                                        |> Maybe.withDefault IdMap.empty
 
                                 choices =
-                                    Id.filter
+                                    IdMap.filter
                                         (\id _ ->
-                                            not (Id.member id parts)
+                                            not (IdMap.member id parts)
                                                 || List.member id
                                                     work.belongsTo
                                         )
@@ -756,7 +831,7 @@ modalView model project workMap works =
                             ]
                         ]
 
-                    _ ->
+                    Nothing ->
                         []
 
             DeleteWorkModal workId ->
@@ -784,14 +859,6 @@ modalView model project workMap works =
 
             Hidden ->
                 []
-
-
-isSelected : Set SomeId -> Work -> Bool
-isSelected selection work =
-    Set.member work.id selection
-        || Set.member (unId work.process) selection
-        || List.any (\partId -> Set.member (unId partId) selection)
-            work.belongsTo
 
 
 gatherList :

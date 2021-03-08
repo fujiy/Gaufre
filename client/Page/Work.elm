@@ -14,6 +14,7 @@ import Firestore.Access as Access exposing (Accessor)
 import Firestore.Lens as Lens exposing (o)
 import Firestore.Path as Path
 import Firestore.Path.Id as Id exposing (Id, unId)
+import Firestore.Path.Id.Map as IdMap
 import Firestore.Remote exposing (Remote(..))
 import Firestore.Update as Update exposing (Updater)
 import GDrive exposing (FileMeta)
@@ -355,32 +356,6 @@ view auth model data project =
                         |> Project.authority
                         |> .manageWorkStaffs
 
-                process =
-                    Id.get work.process project.processes
-                        |> Maybe.withDefault Work.nullProcess
-
-                parts =
-                    List.filterMap (flip Id.get project.parts) work.belongsTo
-
-                part =
-                    List.minimumBy .order parts
-                        |> Maybe.withDefault Work.nullPart
-
-                maxPart =
-                    List.maximumBy .order parts
-                        |> Maybe.withDefault Work.nullPart
-
-                workName =
-                    if List.length parts == 1 then
-                        part.name ++ "：" ++ process.name
-
-                    else
-                        part.name
-                            ++ " 〜 "
-                            ++ maxPart.name
-                            ++ "："
-                            ++ process.name
-
                 ( folders, files ) =
                     List.partition GDrive.isFolder model.files
 
@@ -389,6 +364,9 @@ view auth model data project =
 
                 reviewers =
                     List.map Firestore.getId work.reviewers
+
+                title =
+                    Work.title project.processes project.parts work
             in
             div [ class "ui grid" ]
                 [ div [ class "row" ] []
@@ -398,11 +376,10 @@ view auth model data project =
                         [ div [ class "ui fluid card" ]
                             [ div [ class "content" ]
                                 [ fileActions model
-                                , div [ class "header" ] [ text workName ]
+                                , div [ class "header" ] [ text title ]
                                 , div [ class "meta" ]
                                     [ breadcrumb model work
-                                        |> Html.map
-                                            MoveToFolder
+                                        |> Html.map MoveToFolder
                                     ]
                                 ]
                             , div

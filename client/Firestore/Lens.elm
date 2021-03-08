@@ -7,6 +7,7 @@ import Firestore.Desc exposing (Desc)
 import Firestore.Internal exposing (..)
 import Firestore.Path as Path exposing (Path)
 import Firestore.Path.Id as Id exposing (Id(..))
+import Firestore.Path.Id.Map as IdMap
 import Firestore.Path.Map as PathMap
 import Firestore.Path.Map.Slice as Slice
 import Firestore.Remote as Remote exposing (Remote(..))
@@ -232,7 +233,7 @@ doc id =
             \(Collection col) ->
                 Accessor
                     (Slice.doc id)
-                    (Id.get id col.docs
+                    (IdMap.get id col.docs
                         |> Maybe.withDefault (Document col.empty Loading)
                         |> UpToDate
                     )
@@ -242,7 +243,7 @@ doc id =
                     \(Collection col) ->
                         { value =
                             Collection
-                                { col | docs = Id.insert id d col.docs }
+                                { col | docs = IdMap.insert id d col.docs }
                         , requests =
                             Slice.addDoc (Slice.doc id) (PathMap.docRootItem u)
                         , afterwards = noUpdater
@@ -322,7 +323,7 @@ where_ field qop desc a =
                     (Dict.get key col.q
                         |> Maybe.withDefault
                             (Collection
-                                { col | docs = Id.empty, q = Dict.empty }
+                                { col | docs = IdMap.empty, q = Dict.empty }
                             )
                         |> UpToDate
                     )
@@ -350,7 +351,7 @@ getAllRemote =
                 Accessor Slice.colItem
                     (let
                         rs =
-                            Id.items col.docs
+                            IdMap.items col.docs
                                 |> List.map (\(Document _ r) -> r)
                      in
                      if List.isEmpty rs then
@@ -378,7 +379,7 @@ getAll =
                 Accessor Slice.colItem
                     (let
                         rs =
-                            Id.items col.docs
+                            IdMap.items col.docs
                                 |> List.filterMap
                                     (\(Document _ r) -> Remote.toMaybe r)
                      in

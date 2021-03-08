@@ -4,7 +4,8 @@ import Array exposing (Array)
 import Dict exposing (Dict)
 import Firestore.Internal exposing (..)
 import Firestore.Path as Path exposing (Path)
-import Firestore.Path.Id as Id exposing (Id(..), IdMap, SelfId)
+import Firestore.Path.Id as Id exposing (Id(..), SelfId)
+import Firestore.Path.Id.Map as IdMap
 import Firestore.Path.Map as PathMap exposing (Paths)
 import Firestore.Remote as Remote exposing (Remote(..))
 import Json.Decode as Decode exposing (Decoder)
@@ -55,13 +56,18 @@ type FirestoreDesc r
 
 type CollectionDesc l r
     = CollectionDesc
-        { applier : Applier_ (IdMap r (PathMap.Col Value)) l r
+        { applier : Applier_ (IdMap.Map r (PathMap.Col Value)) l r
         , empty : l
         }
 
 
 unField (Field m) =
     m
+
+
+iso : (a -> b) -> (b -> a) -> Iso a b
+iso =
+    Iso
 
 
 map : Iso a b -> Desc a -> Desc b
@@ -171,7 +177,7 @@ collection name getter (DocumentDesc d) (CollectionDesc c) =
                 Collection
                     { name = Id name
                     , empty = d.empty
-                    , docs = Id.empty
+                    , docs = IdMap.empty
                     , q = Dict.empty
                     }
 
@@ -185,7 +191,7 @@ collection name getter (DocumentDesc d) (CollectionDesc c) =
                 -- (Collection col) =
                 --     getter r
                 cpv =
-                    Id.get (Id name) cpvs
+                    IdMap.get (Id name) cpvs
                         |> Maybe.withDefault PathMap.emptyCol
             in
             Result.map2
@@ -196,7 +202,7 @@ collection name getter (DocumentDesc d) (CollectionDesc c) =
                     (\( did, dpv ) rd ->
                         let
                             (Document sub doc) =
-                                Id.get did col.docs
+                                IdMap.get did col.docs
                                     |> Maybe.withDefault
                                         (Document d.empty Loading)
 
@@ -209,12 +215,12 @@ collection name getter (DocumentDesc d) (CollectionDesc c) =
                                         (Decode.decodeValue d.decoder)
                         in
                         Result.map2
-                            (Id.insert did)
+                            (IdMap.insert did)
                             (Result.map2 Document sub_ doc_)
                             rd
                     )
                     (Ok col.docs)
-                    (PathMap.subDocs cpv |> Id.toList)
+                    (PathMap.subDocs cpv |> IdMap.toList)
                 )
                 (List.foldr
                     (\qpv rq ->
@@ -228,13 +234,13 @@ collection name getter (DocumentDesc d) (CollectionDesc c) =
                                         (Collection
                                             { name = Id name
                                             , empty = d.empty
-                                            , docs = Id.empty
+                                            , docs = IdMap.empty
                                             , q = Dict.empty
                                             }
                                         )
 
                             qcol_ =
-                                applier (Id.singleton (Id name) qpv.col) qcol
+                                applier (IdMap.singleton (Id name) qpv.col) qcol
                         in
                         Result.map2 (Dict.insert key) qcol_ rq
                     )
@@ -330,9 +336,9 @@ request =
         )
 
 
-idMap : Desc a -> Desc (IdMap x a)
+idMap : Desc a -> Desc (IdMap.Map x a)
 idMap desc =
-    map (Iso Id.fromDict Id.toDict) (dict desc)
+    map (Iso IdMap.fromDict IdMap.toDict) (dict desc)
 
 
 

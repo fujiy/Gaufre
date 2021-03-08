@@ -4,7 +4,8 @@ import Array exposing (Array)
 import Array.Extra as Array
 import Dict exposing (Dict)
 import Firestore.Path exposing (Path)
-import Firestore.Path.Id exposing (Id, IdMap)
+import Firestore.Path.Id exposing (Id)
+import Firestore.Path.Id.Map as IdMap
 import Firestore.Path.Map as PathMap
 import Firestore.Path.Map.Slice as Slice exposing (Slice)
 import Firestore.Remote exposing (Remote(..))
@@ -16,7 +17,7 @@ type Collection s r
     = Collection
         { name : Id r
         , empty : s
-        , docs : IdMap r (Document s r)
+        , docs : IdMap.Map r (Document s r)
         , q : Dict QueryKey (Collection s r)
         }
 
