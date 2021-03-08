@@ -2,18 +2,17 @@ module Page.Projects exposing (..)
 
 import Array
 import Array.Extra as Array
-import Data exposing (Auth, Data, project)
+import Data exposing (..)
 import Data.Client as Client
-import Data.Project as Project exposing (Project)
-import Data.Work as Work exposing (Process)
-import Dict
+import Data.Project as Project
+import Data.Work as Work
 import Firestore exposing (..)
 import Firestore.Access as Access exposing (Accessor)
 import Firestore.Lens as Lens exposing (o)
 import Firestore.Path as Path
 import Firestore.Path.Id as Id exposing (Id)
 import Firestore.Path.Id.Map as IdMap
-import Firestore.Remote as Remote exposing (Remote(..))
+import Firestore.Remote exposing (Remote(..))
 import Firestore.Update as Update exposing (Updater)
 import GDrive
 import Html exposing (Html, a, button, div, input, node, text)
@@ -40,9 +39,7 @@ type Msg
     | HideModal
     | Search String
     | SearchResult (List GDrive.FileMeta)
-    | JoinProject Project
-    | AddProject GDrive.FileMeta
-    | AddProjectProcess (Id Project) Process GDrive.FileMeta
+    | ProjectUpdate (Id Project) Project.Update
     | None
 
 
@@ -113,65 +110,10 @@ update auth msg model =
                                     )
                     )
 
-        ( JoinProject project, _ ) ->
+        ( ProjectUpdate projectId upd, _ ) ->
             ( model
-            , Update.modify (Data.myClient auth) Client.desc <|
-                \client ->
-                    { client
-                        | projects =
-                            Array.push (Data.projectRef <| Id.self project)
-                                client.projects
-                    }
-            )
-
-        ( AddProject file, _ ) ->
-            ( model
-            , Update.all
-                [ Update.modify (Data.myClient auth) Client.desc <|
-                    \client ->
-                        { client
-                            | projects =
-                                Array.push
-                                    (Data.projectRef <| Id.fromString file.id)
-                                    client.projects
-                        }
-                , Update.set
-                    (o Data.projects <| Lens.doc <| Id.fromString file.id)
-                    Project.desc
-                  <|
-                    Project.init file <|
-                        Data.myRef auth
-                , Update.batch <|
-                    flip List.map Work.defaultProcesses <|
-                        \process _ ->
-                            GDrive.createFolder
-                                auth.token
-                                process.name
-                                [ file.id ]
-                                |> Cmd.map
-                                    (Result.map
-                                        (AddProjectProcess
-                                            (Id.fromString file.id)
-                                            process
-                                        )
-                                        >> Result.withDefault None
-                                    )
-                ]
-            )
-
-        ( AddProjectProcess pid process file, _ ) ->
-            ( model
-            , Update.modify
-                (o Data.projects <| Lens.doc pid)
-                Project.desc
-              <|
-                \project ->
-                    { project
-                        | processes =
-                            IdMap.insert (Id.fromString file.id)
-                                process
-                                project.processes
-                    }
+            , Project.update auth projectId upd
+                |> Update.map (ProjectUpdate projectId)
             )
 
         _ ->
@@ -205,7 +147,7 @@ view auth model data =
             (o (Data.myProjects auth) Lens.getAll)
             data
         )
-        (Access.access (o (Data.myClient auth) Lens.get) data)
+        (Access.access (o (Client.my auth) Lens.get) data)
     <|
         \projects client ->
             let
@@ -264,7 +206,7 @@ invitedProjectCard project =
             ]
         , div
             [ class "ui bottom attached primary button"
-            , onClick <| JoinProject project
+            , onClick <| ProjectUpdate (Id.self project) Project.Join
             ]
             [ icon "sign-in", text "参加する" ]
         ]
@@ -369,7 +311,9 @@ projectList auth data files =
                                     [ class
                                         "ui right floated basic primary button"
                                     , classIf (Maybe.isJust status) "disabled"
-                                    , onClick <| AddProject file
+                                    , onClick <|
+                                        ProjectUpdate (Id.fromString file.id) <|
+                                            Project.Add file
                                     ]
                                   <|
                                     case status of

@@ -4,12 +4,11 @@ port module Main exposing (..)
 
 import Browser exposing (Document, application)
 import Browser.Navigation as Nav
-import Data exposing (Auth, Data)
-import Data.User exposing (User)
+import Data exposing (Auth, Data, User)
+import Data.Client as Client
 import Firestore as Firestore exposing (Firestore)
 import Firestore.Access as Access exposing (Accessor)
 import Firestore.Update as Update
-import GDrive
 import Html exposing (..)
 import Page
 import Page.Entrance as Entrance
@@ -87,7 +86,7 @@ update msg model =
                         ( firestore, mview, cmd ) =
                             Firestore.update
                                 firestoreCmdPort
-                                (Data.initClient auth user)
+                                (Client.init auth user)
                                 (pageView auth <| Page.init url)
                                 (Firestore.init Data.desc)
 

@@ -1,19 +1,19 @@
 module Data exposing (..)
 
-import Array
+import Array exposing (Array)
 import Browser.Navigation as Nav
-import Data.Client as Client
-import Data.Project as Project exposing (Project)
-import Data.User as User exposing (User)
 import Firestore exposing (..)
-import Firestore.Access as Access exposing (Accessor)
-import Firestore.Desc as Desc exposing (FirestoreDesc)
+import Firestore.Desc as Desc exposing (Desc, DocumentDesc, FirestoreDesc)
 import Firestore.Lens as Lens exposing (o, where_)
 import Firestore.Path as Path
-import Firestore.Path.Id as Id exposing (Id, unId)
-import Firestore.Update as Update exposing (Updater)
+import Firestore.Path.Id as Id exposing (Id, SelfId, unId)
+import Firestore.Path.Id.Map as IdMap
 import GDrive
 import Maybe.Extra as Maybe
+
+
+
+-- Data types
 
 
 type alias Auth =
@@ -24,67 +24,153 @@ type alias Auth =
 
 
 type alias Data =
-    { users : User.Collection
-    , clients : Client.Collection
-    , projects : Project.Collection
+    { users : Collection () User
+    , clients : Collection () Client
+    , projects : Collection ProjectSub Project
     }
+
+
+type alias User =
+    { id : SelfId
+    , name : String
+    , image : String
+    , email : String
+    }
+
+
+type alias Client =
+    { projects : Array (Reference ProjectSub Project)
+    }
+
+
+type alias Project =
+    { id : SelfId
+    , name : String
+    , members : List (Reference () User)
+    , admins : List (Reference () User)
+    , owner : Reference () User
+    , processes : IdMap.Map Process Process
+    , parts : IdMap.Map Part Part
+    }
+
+
+type alias ProjectSub =
+    { works : Collection () Work
+    }
+
+
+type alias Work =
+    { id : SelfId
+    , name : String
+    , process : Id Process
+    , belongsTo : List (Id Part)
+    , staffs : List (Reference () User)
+    , reviewers : List (Reference () User)
+    , waitingFor : List WorkRef
+    }
+
+
+type alias Process =
+    { name : String
+    , order : Float
+    , upstreams : List SelfId
+    }
+
+
+type alias Part =
+    { name : String
+    , order : Float
+    , parent : Maybe SelfId
+    }
+
+
+type WorkRef
+    = Ref (Reference () Work)
+
+
+
+-- Utilities
+-- Desc
+
+
+desc : FirestoreDesc Data
+desc =
+    Desc.collection "users" .users userDesc
+        >> Desc.collection "clients" .clients clientDesc
+        >> Desc.collection "projects" .projects projectDesc
+        |> Desc.firestore Data
+
+
+userDesc : DocumentDesc () User
+userDesc =
+    Desc.documentWithId User <|
+        Desc.field "name" .name Desc.string
+            >> Desc.field "image" .image Desc.string
+            >> Desc.field "email" .email Desc.string
+
+
+clientDesc : DocumentDesc () Client
+clientDesc =
+    Desc.document Client <|
+        Desc.field "projects"
+            .projects
+            (Desc.array Desc.reference)
+
+
+projectDesc : DocumentDesc ProjectSub Project
+projectDesc =
+    Desc.documentWithIdAndSubs
+        Project
+        (Desc.field "name" .name Desc.string
+            >> Desc.field "members" .members (Desc.list Desc.reference)
+            >> Desc.field "admins" .admins (Desc.list Desc.reference)
+            >> Desc.field "owner" .owner Desc.reference
+            >> Desc.field "proesses" .processes (Desc.idMap processDesc)
+            >> Desc.field "parts" .parts (Desc.idMap partDesc)
+        )
+        ProjectSub
+        (Desc.collection "works" .works workDesc)
+
+
+workDesc : DocumentDesc () Work
+workDesc =
+    Desc.documentWithId Work <|
+        Desc.field "name" .name Desc.string
+            >> Desc.field "process" .process Desc.id
+            >> Desc.field "belongsTo" .belongsTo (Desc.list Desc.id)
+            >> Desc.field "staffs" .staffs (Desc.list Desc.reference)
+            >> Desc.field "reviewers" .reviewers (Desc.list Desc.reference)
+            >> Desc.optionWithDefault "waitingFor"
+                .waitingFor
+                []
+                (Desc.list <|
+                    Desc.map (Desc.iso Ref (\(Ref r) -> r)) Desc.reference
+                )
+
+
+processDesc : Desc Process
+processDesc =
+    Desc.object Process <|
+        Desc.field "name" .name Desc.string
+            >> Desc.field "order" .order Desc.float
+            >> Desc.field "upstreams" .upstreams (Desc.list Desc.string)
+
+
+partDesc : Desc Part
+partDesc =
+    Desc.object Part <|
+        Desc.field "name" .name Desc.string
+            >> Desc.field "order" .order Desc.float
+            >> Desc.option "parent" .parent Desc.string
 
 
 
 -- Utilities
 
 
-userRole : Project -> Id User -> Project.Role
-userRole p id =
-    if Firestore.getId p.owner == id then
-        Project.Owner
-
-    else if List.any (Firestore.getId >> (==) id) p.admins then
-        Project.Admin
-
-    else
-        Project.Staff
-
-
-myRole : Project -> Auth -> Project.Role
-myRole p auth =
-    userRole p <| Id.fromString auth.uid
-
-
-
--- Desc
-
-
-desc : FirestoreDesc Data
-desc =
-    Desc.collection "users" .users User.desc
-        >> Desc.collection "clients" .clients Client.desc
-        >> Desc.collection "projects" .projects Project.desc
-        |> Desc.firestore Data
-
-
-
--- Lenses
--- Collection
-
-
-clients : Lens Root Data Col Client.Collection
-clients =
-    Lens.collection .clients (\b a -> { a | clients = b })
-
-
-users : Lens Root Data Col User.Collection
-users =
-    Lens.collection .users (\b a -> { a | users = b })
-
-
-projects : Lens Root Data Col Project.Collection
-projects =
-    Lens.collection .projects (\b a -> { a | projects = b })
-
-
-
--- User
+myRef : Auth -> Reference () User
+myRef auth =
+    ref <| Path.fromIds [ "users", unId <| myId auth ]
 
 
 myId : Auth -> Id x
@@ -92,118 +178,41 @@ myId auth =
     Id.fromString auth.uid
 
 
-myClient : Auth -> Lens Root Data Doc Client.Document
-myClient auth =
-    o clients <| Lens.doc <| myId auth
-
-
-me : Auth -> Lens Root Data Doc User.Document
-me auth =
-    o users <| Lens.doc <| myId auth
-
-
-userHasEmail : String -> Lens Root Data Col User.Collection
-userHasEmail email =
-    o users <| Lens.where_ "email" Lens.EQ Desc.string email
-
-
-userRef : Id User -> User.Reference
-userRef id =
-    Firestore.ref <| Path.fromIds [ "users", Id.unId id ]
-
-
-myRef : Auth -> User.Reference
-myRef auth =
-    userRef <| myId auth
+gdriveUpdate : GDrive.Update
+gdriveUpdate =
+    GDrive.update
 
 
 
--- Project
+-- Lenses
 
 
-myProjects : Auth -> Lens Root Data Col Project.Collection
+clients : Lens Root Data Col (Collection () Client)
+clients =
+    Lens.collection .clients (\b a -> { a | clients = b })
+
+
+users : Lens Root Data Col (Collection () User)
+users =
+    Lens.collection .users (\b a -> { a | users = b })
+
+
+projects : Lens Root Data Col (Collection ProjectSub Project)
+projects =
+    Lens.collection .projects (\b a -> { a | projects = b })
+
+
+myProjects : Auth -> Lens Root Data Col (Collection ProjectSub Project)
 myProjects auth =
     o projects <|
         Lens.where_ "members" Lens.CONTAINS Desc.reference (myRef auth)
 
 
-currentProject : Auth -> Int -> Lens Root Data Doc Project.Document
-currentProject auth i =
-    projectDeref <|
-        o (myClient auth) <|
-            o Lens.get <|
-                o Client.projects <|
-                    Lens.atArray i
-
-
-project : Id Project -> Lens Root Data Doc Project.Document
+project : Id Project -> Lens Root Data Doc (Document ProjectSub Project)
 project id =
     o projects <| Lens.doc id
 
 
-projectDeref :
-    Lens Root Data Item Project.Reference
-    -> Lens Root Data Doc Project.Document
-projectDeref =
-    Lens.deref projects Lens.end
-
-
-projectMembers : Project -> Lens Root Data Doc (List User.Document)
-projectMembers p =
-    Lens.derefs users Lens.end <|
-        Lens.const p.members
-
-
-projectRef : Id Project -> Project.Reference
-projectRef id =
-    Firestore.ref <| Path.fromIds [ "projects", unId id ]
-
-
-
--- Updaters
-
-
-initClient : Auth -> User -> Updater Data msg
-initClient auth user =
-    Update.all
-        [ Update.default (me auth) User.desc user
-        , Update.default (myClient auth) Client.desc <|
-            { projects = Array.empty }
-        ]
-
-
-inviteMember : Auth -> Id Project -> String -> Updater Data (Maybe User)
-inviteMember auth projectId name =
-    let
-        email =
-            name ++ "@gmail.com"
-    in
-    Update.andThen
-        (Access.access <|
-            (o users <|
-                o (where_ "email" Lens.EQ Desc.string email) Lens.getAll
-            )
-        )
-        (\us ->
-            case us of
-                [ user ] ->
-                    Update.all
-                        [ Update.modify (project projectId) Project.desc <|
-                            \p ->
-                                { p
-                                    | members =
-                                        userRef (Id.self user) :: p.members
-                                }
-                        , Update.command <|
-                            \_ ->
-                                GDrive.permissions_create auth.token
-                                    (unId projectId)
-                                    { role = GDrive.Writer
-                                    , type_ = GDrive.User user.email
-                                    }
-                                    |> Cmd.map (\_ -> Just user)
-                        ]
-
-                _ ->
-                    Update.succeed Nothing
-        )
+myClient : Auth -> Lens Root Data Doc (Document () Client)
+myClient auth =
+    o clients <| Lens.doc <| myId auth

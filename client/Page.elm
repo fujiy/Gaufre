@@ -1,8 +1,9 @@
 module Page exposing (..)
 
 import Browser
-import Data exposing (Auth, Data, project)
-import Data.Project as Project exposing (Project)
+import Data exposing (..)
+import Data.Client as Client
+import Data.Project as Project
 import Data.User as User
 import Firestore
 import Firestore.Access as Access exposing (Accessor)
@@ -41,7 +42,7 @@ type Page
 type Msg
     = ProjectsMsg Projects.Msg
     | DashboardMsg Dashboard.Msg
-    | OverviewMsg Overview.Msg
+    | OverviewMsg (Id Project) Overview.Msg
     | WorkMsg Work.Msg
     | MembersMsg (Id Project) Members.Msg
     | SignOut
@@ -112,13 +113,17 @@ update auth message model =
             , Update.map ProjectsMsg upd
             )
 
-        ( OverviewMsg msg, Overview m ) ->
+        ( OverviewMsg projectId msg, Overview m ) ->
             let
                 ( m_, upd ) =
-                    Overview.update auth msg { project = model.project } m
+                    Overview.update auth
+                        msg
+                        { project = model.project }
+                        projectId
+                        m
             in
             ( { model | page = Overview m_ }
-            , Update.map OverviewMsg upd
+            , Update.map (OverviewMsg projectId) upd
             )
 
         ( WorkMsg msg, Work m ) ->
@@ -148,7 +153,7 @@ view auth model data =
     let
         project =
             Access.access
-                (o (Data.currentProject auth model.project) Lens.get)
+                (o (Client.currentProject auth model.project) Lens.get)
                 data
                 |> Access.maybe
     in
@@ -179,8 +184,11 @@ view auth model data =
                     Overview m ->
                         Access.fromJust project
                             |> Access.andThen
-                                (Overview.view auth m data)
-                            |> Access.map (map OverviewMsg)
+                                (\p ->
+                                    Overview.view auth m data p
+                                        |> Access.map
+                                            (map <| OverviewMsg <| Id.self p)
+                                )
 
                     Work m ->
                         Access.fromJust project
@@ -230,7 +238,7 @@ sidemenu auth model data mproject =
             href <| Url.Builder.absolute [ String.fromInt model.project, p ] []
     in
     flip Access.map
-        (Access.access (o (Data.me auth) Lens.get) data)
+        (Access.access (o (User.me auth) Lens.get) data)
     <|
         \user ->
             div [ class "ui visible vertical inverted sidebar menu" ]
@@ -269,7 +277,7 @@ sidemenu auth model data mproject =
                     [ User.avatar user
                     , case mproject of
                         Just project ->
-                            case Data.myRole project auth of
+                            case Project.myRole project auth of
                                 Project.Owner ->
                                     div [ class "ui basic label" ]
                                         [ text "管理者" ]

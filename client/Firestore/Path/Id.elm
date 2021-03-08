@@ -13,6 +13,11 @@ type alias SelfId =
     String
 
 
+null : Id x
+null =
+    Id ""
+
+
 coerce : Id a -> Id b
 coerce (Id str) =
     Id str

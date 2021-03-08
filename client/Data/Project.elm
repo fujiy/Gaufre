@@ -1,27 +1,21 @@
 module Data.Project exposing (..)
 
+import Array
+import Data exposing (..)
 import Data.User as User
-import Data.Work as Work exposing (Part, Process, Work)
+import Data.Work as Work
 import Dict.Extra as Dict
 import Firestore exposing (..)
-import Firestore.Desc as Desc exposing (DocumentDesc)
-import Firestore.Lens as Lens exposing (o)
-import Firestore.Path.Id as Id exposing (Id, SelfId)
+import Firestore.Access as Access
+import Firestore.Desc as Desc
+import Firestore.Lens as Lens exposing (o, where_)
+import Firestore.Path as Path
+import Firestore.Path.Id as Id exposing (Id, unId)
 import Firestore.Path.Id.Map as IdMap
-import Firestore.Path.Id.Set as IdSet
+import Firestore.Update as Update exposing (Updater)
 import GDrive
 import Maybe.Extra as Maybe
-
-
-type alias Project =
-    { id : SelfId
-    , name : String
-    , members : List User.Reference
-    , admins : List User.Reference
-    , owner : User.Reference
-    , processes : IdMap.Map Process Process
-    , parts : IdMap.Map Part Part
-    }
+import Util exposing (flip)
 
 
 type Role
@@ -74,40 +68,36 @@ authority role =
 -- Firestore
 
 
-type alias Sub =
-    { works : Work.Collection
-    }
-
-
 type alias Collection =
-    Firestore.Collection Sub Project
+    Firestore.Collection ProjectSub Project
 
 
 type alias Reference =
-    Firestore.Reference Sub Project
+    Firestore.Reference ProjectSub Project
 
 
 type alias Document =
-    Firestore.Document Sub Project
-
-
-desc : DocumentDesc Sub Project
-desc =
-    Desc.documentWithIdAndSubs
-        Project
-        (Desc.field "name" .name Desc.string
-            >> Desc.field "members" .members (Desc.list Desc.reference)
-            >> Desc.field "admins" .admins (Desc.list Desc.reference)
-            >> Desc.field "owner" .owner Desc.reference
-            >> Desc.field "proesses" .processes (Desc.idMap Work.processDesc)
-            >> Desc.field "parts" .parts (Desc.idMap Work.partDesc)
-        )
-        Sub
-        (Desc.collection "works" .works Work.desc)
+    Firestore.Document ProjectSub Project
 
 
 
 -- Lenses
+
+
+deref : Lens Root Data Item Reference -> Lens Root Data Doc Document
+deref =
+    Lens.deref projects Lens.end
+
+
+members : Project -> Lens Root Data Doc (List User.Document)
+members p =
+    Lens.derefs users Lens.end <|
+        Lens.const p.members
+
+
+ref : Id Project -> Reference
+ref id =
+    Firestore.ref <| Path.fromIds [ "projects", unId id ]
 
 
 works : Lens Doc Document Col Work.Collection
@@ -125,15 +115,32 @@ work id =
 
 
 init : GDrive.FileMeta -> User.Reference -> Project
-init file user =
-    { id = file.id
-    , name = file.name
+init folder user =
+    { id = folder.id
+    , name = folder.name
     , members = [ user ]
     , admins = [ user ]
     , owner = user
     , processes = IdMap.empty
     , parts = IdMap.empty
     }
+
+
+userRole : Project -> Id User -> Role
+userRole p id =
+    if Firestore.getId p.owner == id then
+        Owner
+
+    else if List.any (Firestore.getId >> (==) id) p.admins then
+        Admin
+
+    else
+        Staff
+
+
+myRole : Project -> Auth -> Role
+myRole p auth =
+    userRole p <| Id.fromString auth.uid
 
 
 makePartName : Int -> String
@@ -170,3 +177,161 @@ newPart p =
                 )
     in
     try (IdMap.size p.parts) (IdMap.size p.parts + 1)
+
+
+
+-- Updaters
+
+
+type Update
+    = Join
+    | Add GDrive.FileMeta
+    | AddProcess Process GDrive.FileMeta
+    | AddPart (List (Id Process)) (Id Part) Part
+    | InviteMember String
+    | SetProcessUpstreams (Id Process) (List (Id Process))
+    | WorkUpdate (List (Id Work)) Work.Update
+    | None
+
+
+update :
+    Auth
+    -> Id Project
+    -> Update
+    -> Updater Data Update
+update auth projectId upd =
+    let
+        lens =
+            project projectId
+    in
+    case upd of
+        Join ->
+            Update.modify (myClient auth) clientDesc <|
+                \client ->
+                    { client
+                        | projects =
+                            Array.push (ref projectId) client.projects
+                    }
+
+        Add folder ->
+            Update.all
+                [ Update.modify (myClient auth) clientDesc <|
+                    \client ->
+                        { client
+                            | projects =
+                                Array.push (ref projectId) client.projects
+                        }
+                , Update.set lens projectDesc <|
+                    init folder (Data.myRef auth)
+                , Update.batch <|
+                    flip List.map Work.defaultProcesses <|
+                        \process _ ->
+                            GDrive.createFolder
+                                auth.token
+                                process.name
+                                [ folder.id ]
+                                |> Cmd.map
+                                    (Result.map
+                                        (AddProcess process)
+                                        >> Result.withDefault None
+                                    )
+                ]
+
+        AddProcess process folder ->
+            Update.modify lens projectDesc <|
+                \project ->
+                    { project
+                        | processes =
+                            IdMap.insert (Id.fromString folder.id)
+                                process
+                                project.processes
+                    }
+
+        InviteMember name ->
+            let
+                email =
+                    name ++ "@gmail.com"
+            in
+            Update.andThen
+                (Access.access <|
+                    (o users <|
+                        o (where_ "email" Lens.EQ Desc.string email)
+                            Lens.getAll
+                    )
+                )
+                (\us ->
+                    case us of
+                        [ user ] ->
+                            Update.all
+                                [ Update.modify lens projectDesc <|
+                                    \p ->
+                                        { p
+                                            | members =
+                                                User.ref (Id.self user)
+                                                    :: p.members
+                                        }
+                                , Update.command <|
+                                    \_ ->
+                                        GDrive.permissions_create auth.token
+                                            (unId projectId)
+                                            { role = GDrive.Writer
+                                            , type_ = GDrive.User user.email
+                                            }
+                                            |> Cmd.map (\_ -> None)
+                                ]
+
+                        _ ->
+                            Update.none
+                )
+
+        AddPart processes newId part ->
+            Update.all
+                [ Update.modify lens projectDesc <|
+                    \p -> { p | parts = IdMap.insert newId part p.parts }
+                , List.map
+                    (\processId _ ->
+                        GDrive.createFolder auth.token
+                            part.name
+                            [ unId processId ]
+                            |> Cmd.map
+                                (Result.map
+                                    (Work.FolderCreated processId newId
+                                        >> WorkUpdate [ Id.null ]
+                                    )
+                                    >> Result.withDefault None
+                                )
+                    )
+                    processes
+                    |> Update.batch
+                ]
+
+        SetProcessUpstreams processId upstreams ->
+            Update.modify lens projectDesc <|
+                \project ->
+                    { project
+                        | processes =
+                            IdMap.modify processId
+                                (\process ->
+                                    { process
+                                        | upstreams =
+                                            List.map unId upstreams
+                                    }
+                                )
+                                project.processes
+                    }
+
+        WorkUpdate ids wupd ->
+            List.map
+                (\workId ->
+                    let
+                        lens_ id =
+                            o lens <| work id
+                    in
+                    Work.update auth workId lens_ wupd
+                        |> Update.map (WorkUpdate [ workId ])
+                )
+                ids
+                |> Update.all
+
+        None ->
+            Update.none

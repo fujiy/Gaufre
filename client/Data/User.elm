@@ -1,24 +1,18 @@
 module Data.User exposing (..)
 
+import Data exposing (..)
 import Dict
 import Dict.Extra as Dict
-import Firestore
-import Firestore.Desc as Desc exposing (DocumentDesc)
-import Firestore.Path.Id as Id exposing (Id, SelfId, unId)
+import Firestore exposing (..)
+import Firestore.Desc as Desc
+import Firestore.Lens as Lens exposing (o)
+import Firestore.Path as Path
+import Firestore.Path.Id as Id exposing (Id, unId)
 import Html exposing (Html, a, div, img, input, node, span, text)
 import Html.Attributes as Attr exposing (attribute, class, src, type_)
 import Html.Events exposing (onClick)
 import List.Extra as List
-import Set
 import Util exposing (onChangeValues)
-
-
-type alias User =
-    { id : SelfId
-    , name : String
-    , image : String
-    , email : String
-    }
 
 
 
@@ -37,12 +31,23 @@ type alias Reference =
     Firestore.Reference () User
 
 
-desc : DocumentDesc () User
-desc =
-    Desc.documentWithId User <|
-        Desc.field "name" .name Desc.string
-            >> Desc.field "image" .image Desc.string
-            >> Desc.field "email" .email Desc.string
+
+-- Lenses
+
+
+me : Auth -> Lens Root Data Doc Document
+me auth =
+    o users <| Lens.doc <| myId auth
+
+
+userHasEmail : String -> Lens Root Data Col Collection
+userHasEmail email =
+    o users <| Lens.where_ "email" Lens.EQ Desc.string email
+
+
+ref : Id User -> Reference
+ref id =
+    Firestore.ref <| Path.fromIds [ "users", Id.unId id ]
 
 
 

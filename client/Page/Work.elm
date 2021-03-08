@@ -2,10 +2,11 @@ module Page.Work exposing (..)
 
 import Browser.Navigation as Nav
 import Bytes exposing (Bytes)
-import Data exposing (Auth, Data)
-import Data.Project as Project exposing (Project)
-import Data.User as User exposing (User)
-import Data.Work as Work exposing (Work)
+import Data exposing (..)
+import Data.Client as Client
+import Data.Project as Project
+import Data.User as User
+import Data.Work as Work
 import Dict exposing (Dict)
 import Dict.Extra as Dict
 import File exposing (File)
@@ -14,14 +15,12 @@ import Firestore.Access as Access exposing (Accessor)
 import Firestore.Lens as Lens exposing (o)
 import Firestore.Path as Path
 import Firestore.Path.Id as Id exposing (Id, unId)
-import Firestore.Path.Id.Map as IdMap
 import Firestore.Remote exposing (Remote(..))
 import Firestore.Update as Update exposing (Updater)
 import GDrive exposing (FileMeta)
 import Html exposing (Html, button, div, img, input, label, node, text)
 import Html.Attributes exposing (attribute, class, hidden, href, placeholder, src, style, type_, value)
-import Html.Events as Events exposing (onClick, onDoubleClick, onInput)
-import Json.Decode as Decode
+import Html.Events exposing (onClick, onDoubleClick, onInput)
 import List.Extra as List
 import Maybe.Extra as Maybe
 import Result.Extra as Result
@@ -77,8 +76,7 @@ type Msg
     | SelectFile FileMeta Bool Bool
     | ClearSelection
     | ModalState Modal
-    | SetWorkStaffs (List (Id User))
-    | SetWorkReviewers (List (Id User))
+    | WorkUpdate Work.Update
     | Rename String FileMeta
     | Delete (List FileMeta)
     | Upload (List ( String, File ))
@@ -121,7 +119,7 @@ update :
 update auth msg m model =
     let
         projectLens =
-            Data.currentProject auth m.project
+            Client.currentProject auth m.project
     in
     case msg of
         GotFiles append files__ ->
@@ -211,20 +209,14 @@ update auth msg m model =
             , Update.none
             )
 
-        SetWorkStaffs users ->
+        WorkUpdate upd ->
             ( model
-            , Update.modify (o projectLens <| Project.work model.workId)
-                Work.desc
-              <|
-                \work -> { work | staffs = userRefs users }
-            )
-
-        SetWorkReviewers users ->
-            ( model
-            , Update.modify (o projectLens <| Project.work model.workId)
-                Work.desc
-              <|
-                \work -> { work | reviewers = userRefs users }
+            , let
+                lens id =
+                    o projectLens <| Project.work id
+              in
+              Work.update auth model.workId lens upd
+                |> Update.map WorkUpdate
             )
 
         Rename name file ->
@@ -347,12 +339,12 @@ view auth model data project =
             )
             data
         )
-        (Access.access (o (Data.projectMembers project) Lens.gets) data)
+        (Access.access (o (Project.members project) Lens.gets) data)
     <|
         \work members ->
             let
                 editable =
-                    Data.myRole project auth
+                    Project.myRole project auth
                         |> Project.authority
                         |> .manageWorkStaffs
 
@@ -417,12 +409,14 @@ view auth model data project =
                                 [ Html.p []
                                     [ text "担当："
                                     , User.list editable members staffs []
-                                        |> Html.map SetWorkStaffs
+                                        |> Html.map
+                                            (WorkUpdate << Work.SetStaffs)
                                     ]
                                 , Html.p []
                                     [ text "チェック："
                                     , User.list editable members reviewers []
-                                        |> Html.map SetWorkReviewers
+                                        |> Html.map
+                                            (WorkUpdate << Work.SetReviewers)
                                     ]
                                 ]
                             ]

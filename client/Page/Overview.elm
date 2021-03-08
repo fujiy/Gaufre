@@ -1,10 +1,10 @@
 module Page.Overview exposing (..)
 
 import Browser.Navigation as Nav
-import Data exposing (Auth, Data)
-import Data.Project as Project exposing (Project, newPart, work)
-import Data.User as User exposing (User)
-import Data.Work as Work exposing (Part, Process, Work)
+import Data exposing (..)
+import Data.Project as Project
+import Data.User as User
+import Data.Work as Work
 import Dict exposing (Dict)
 import Dict.Extra as Dict
 import Firestore exposing (Id)
@@ -16,7 +16,7 @@ import Firestore.Path.Id.Map as IdMap
 import Firestore.Path.Id.Set as IdSet
 import Firestore.Remote exposing (Remote(..))
 import Firestore.Update as Update exposing (Updater)
-import GDrive exposing (FileMeta)
+import GDrive
 import Html exposing (Html, button, div, input, label, node, table, td, text, th, thead, tr)
 import Html.Attributes exposing (checked, class, colspan, placeholder, rowspan, style, type_, value)
 import Html.Events exposing (onCheck, onClick, onDoubleClick, onInput)
@@ -24,7 +24,6 @@ import Html.Keyed as Keyed
 import List.Extra as List
 import Maybe.Extra as Maybe
 import Result.Extra as Result
-import Set exposing (Set)
 import Url.Builder as Url
 import Util exposing (..)
 import View.Button as Button
@@ -64,27 +63,18 @@ type Msg
     | SelectProcess (Id Process) Bool Bool
     | SelectPart (Id Part) Bool Bool
     | ClearSelection
-    | AddPart (List (Id Process)) (Id Part) Part
-    | AddWork (Id Process) (Id Part) String
-    | CreatedWorkFolder (Id Process) (Id Part) FileMeta
-    | SetWorkStaffs (List Work) (List (Id User))
-    | SetWorkReviewers (List Work) (List (Id User))
-    | SetWorkBelongsTo Work (List (Id Part))
-    | DeleteWork (Id Work)
-    | SetProcessUpstreams (Id Process) (List (Id Process))
+    | WorkUpdate (List (Id Work)) Work.Update
+    | ProjectUpdate Project.Update
 
 
 update :
     Auth
     -> Msg
     -> { project : Int }
+    -> Id Project
     -> Model
     -> ( Model, Updater Data Msg )
-update auth msg m model =
-    let
-        projectLens =
-            Data.currentProject auth m.project
-    in
+update auth msg m projectId model =
     case msg of
         ModalState modal ->
             ( { model | modal = modal }
@@ -142,116 +132,15 @@ update auth msg m model =
             , Update.none
             )
 
-        AddPart processes newId newPart ->
+        WorkUpdate works upd ->
             ( model
-            , Update.all
-                [ Update.modify projectLens Project.desc <|
-                    \p -> { p | parts = IdMap.insert newId newPart p.parts }
-                , List.map
-                    (\processId _ ->
-                        GDrive.createFolder auth.token
-                            newPart.name
-                            [ unId processId ]
-                            |> Cmd.map
-                                (Result.map
-                                    (CreatedWorkFolder processId newId)
-                                    >> Result.withDefault None
-                                )
-                    )
-                    processes
-                    |> Update.batch
-                ]
+            , Project.update auth projectId (Project.WorkUpdate works upd)
+                |> Update.map ProjectUpdate
             )
 
-        AddWork processId partId name ->
+        ProjectUpdate upd ->
             ( model
-            , Update.command <|
-                \_ ->
-                    GDrive.createFolder auth.token
-                        name
-                        [ unId processId ]
-                        |> Cmd.map
-                            (Result.map
-                                (CreatedWorkFolder processId partId)
-                                >> Result.withDefault None
-                            )
-            )
-
-        CreatedWorkFolder processId partId folder ->
-            ( model
-            , Update.set
-                (o projectLens <| Project.work <| Id.fromString folder.id)
-                Work.desc
-                (Work.init (Id.fromString folder.id)
-                    folder.name
-                    processId
-                    partId
-                )
-            )
-
-        SetWorkStaffs works users ->
-            ( model
-            , Update.all <|
-                flip List.map works <|
-                    \w ->
-                        Update.modify
-                            (o projectLens <| Project.work <| Id.self w)
-                            Work.desc
-                        <|
-                            \work -> { work | staffs = userRefs users }
-            )
-
-        SetWorkReviewers works users ->
-            ( model
-            , Update.all <|
-                flip List.map works <|
-                    \w ->
-                        Update.modify
-                            (o projectLens <| Project.work <| Id.self w)
-                            Work.desc
-                        <|
-                            \work -> { work | reviewers = userRefs users }
-            )
-
-        SetWorkBelongsTo w parts ->
-            ( model
-            , Update.modify
-                (o projectLens <| Project.work <| Id.self w)
-                Work.desc
-              <|
-                \work -> { work | belongsTo = parts }
-            )
-
-        DeleteWork workId ->
-            ( model
-            , Update.all
-                [ Update.delete
-                    (o projectLens <| Project.work workId)
-                    Work.desc
-                , Update.command <|
-                    \_ ->
-                        GDrive.files_update auth.token
-                            (unId workId)
-                            { gdriveUpdate | trashed = Just True }
-                            |> Cmd.map (\_ -> None)
-                ]
-            )
-
-        SetProcessUpstreams processId upstreams ->
-            ( model
-            , Update.modify projectLens Project.desc <|
-                \project ->
-                    { project
-                        | processes =
-                            IdMap.modify processId
-                                (\process ->
-                                    { process
-                                        | upstreams =
-                                            List.map unId upstreams
-                                    }
-                                )
-                                project.processes
-                    }
+            , Project.update auth projectId upd |> Update.map ProjectUpdate
             )
 
         None ->
@@ -282,12 +171,12 @@ view auth model data project =
             (o (Data.project <| Id.self project) <| o Project.works Lens.getAll)
             data
         )
-        (Access.access (o (Data.projectMembers project) Lens.gets) data)
+        (Access.access (o (Project.members project) Lens.gets) data)
     <|
         \works_ members ->
             let
                 role =
-                    Data.myRole project auth
+                    Project.myRole project auth
 
                 works =
                     List.concatMap
@@ -414,7 +303,7 @@ tableRow auth model project partIds processes works partId part =
                     ( unId processId ++ unId partId
                     , IdMap.get partId parts
                         |> Maybe.unwrap
-                            (emptyCell (Data.myRole project auth)
+                            (emptyCell (Project.myRole project auth)
                                 processId
                                 partId
                                 part
@@ -539,6 +428,9 @@ actions model project role members works =
         selection =
             List.filter (Work.isSelected model.selection) works
 
+        selectedIds =
+            List.map Id.self selection
+
         staffs =
             gatherList (.staffs >> List.map (Firestore.getId >> unId))
                 selection
@@ -612,7 +504,8 @@ actions model project role members works =
                         members
                         (Dict.keys staffs.all |> List.map Id)
                         (Dict.keys staffs.partially |> List.map Id)
-                        |> Html.map (SetWorkStaffs selection)
+                        |> Html.map
+                            (WorkUpdate selectedIds << Work.SetStaffs)
                     ]
                 , Html.p []
                     [ text "チェック："
@@ -620,7 +513,8 @@ actions model project role members works =
                         members
                         (Dict.keys reviewers.all |> List.map Id)
                         (Dict.keys reviewers.partially |> List.map Id)
-                        |> Html.map (SetWorkReviewers selection)
+                        |> Html.map
+                            (WorkUpdate selectedIds << Work.SetReviewers)
                     ]
                 ]
             , div [ class "content" ]
@@ -655,25 +549,26 @@ modalView model project workMap works =
         , onApprove <|
             case model.modal of
                 AddPartModal processes newId newPart ->
-                    AddPart
-                        (IdMap.toList processes
-                            |> List.filterMap
-                                (\( id, ( _, add ) ) ->
-                                    if add then
-                                        Just id
+                    ProjectUpdate <|
+                        Project.AddPart
+                            (IdMap.toList processes
+                                |> List.filterMap
+                                    (\( id, ( _, add ) ) ->
+                                        if add then
+                                            Just id
 
-                                    else
-                                        Nothing
-                                )
-                        )
-                        newId
-                        newPart
+                                        else
+                                            Nothing
+                                    )
+                            )
+                            newId
+                            newPart
 
                 AddWorkModal processId partId name ->
-                    AddWork processId partId name
+                    WorkUpdate [ Id.null ] <| Work.Add processId partId name
 
-                DeleteWorkModal work ->
-                    DeleteWork work
+                DeleteWorkModal id ->
+                    WorkUpdate [ id ] Work.Delete
 
                 _ ->
                     None
@@ -777,7 +672,10 @@ modalView model project workMap works =
                             [ text "前の工程："
                             , Work.processList project.processes
                                 (List.map Id.selfId process.upstreams)
-                                |> Html.map (SetProcessUpstreams processId)
+                                |> Html.map
+                                    (ProjectUpdate
+                                        << Project.SetProcessUpstreams processId
+                                    )
                             ]
                         , div [ class "actions" ]
                             [ button [ class "ui positive button" ]
@@ -814,7 +712,10 @@ modalView model project workMap works =
                             in
                             [ text "含まれるカット："
                             , Work.partList choices work
-                                |> Html.map (SetWorkBelongsTo work)
+                                |> Html.map
+                                    (WorkUpdate [ Id.self work ]
+                                        << Work.SetBelongsTo
+                                    )
                             ]
                         , div [ class "content" ] <|
                             [ button
@@ -846,7 +747,8 @@ modalView model project workMap works =
                         , div [ class "actions" ]
                             [ button
                                 [ class "ui negative button"
-                                , onClick <| DeleteWork workId
+                                , onClick <|
+                                    WorkUpdate [ workId ] Work.Delete
                                 ]
                                 [ text "削除" ]
                             , button [ class "ui deny button" ]

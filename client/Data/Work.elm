@@ -1,15 +1,18 @@
 module Data.Work exposing (..)
 
+import Data exposing (..)
 import Data.User as User
 import Firestore exposing (..)
-import Firestore.Desc as Desc exposing (Desc, DocumentDesc)
-import Firestore.Path.Id as Id exposing (Id, SelfId, unId)
+import Firestore.Path as Path
+import Firestore.Path.Id as Id exposing (Id, unId)
 import Firestore.Path.Id.Map as IdMap
 import Firestore.Path.Id.Set as IdSet
+import Firestore.Update as Update exposing (Updater)
+import GDrive
 import Html exposing (Html, div, input, node, span, text)
 import Html.Attributes as Attr exposing (attribute, class, type_)
 import List.Extra as List
-import Util exposing (boolAttr, flip, icon, onChangeValues)
+import Util exposing (flip, icon, onChangeValues)
 
 
 type Status
@@ -20,23 +23,8 @@ type Status
     | Complete
 
 
-type alias Work =
-    { id : SelfId
-    , name : String
-    , process : Id Process
-    , belongsTo : List (Id Part)
-    , staffs : List User.Reference
-    , reviewers : List User.Reference
-    , waitingFor : List Ref
-    }
-
-
 type alias Reference =
     Firestore.Reference () Work
-
-
-type Ref
-    = Ref Reference
 
 
 type alias Collection =
@@ -57,22 +45,6 @@ init id name processId partId =
     , reviewers = []
     , waitingFor = []
     }
-
-
-desc : DocumentDesc () Work
-desc =
-    Desc.documentWithId Work <|
-        Desc.field "name" .name Desc.string
-            >> Desc.field "process" .process Desc.id
-            >> Desc.field "belongsTo" .belongsTo (Desc.list Desc.id)
-            >> Desc.field "staffs" .staffs (Desc.list Desc.reference)
-            >> Desc.field "reviewers" .reviewers (Desc.list Desc.reference)
-            >> Desc.optionWithDefault "waitingFor"
-                .waitingFor
-                []
-                (Desc.list <|
-                    Desc.map (Desc.iso Ref (\(Ref r) -> r)) Desc.reference
-                )
 
 
 title : IdMap.Map Process Process -> IdMap.Map Part Part -> Work -> String
@@ -181,24 +153,9 @@ statusNumber status =
 -- Process
 
 
-type alias Process =
-    { name : String
-    , order : Float
-    , upstreams : List SelfId
-    }
-
-
 nullProcess : Process
 nullProcess =
     { name = "Null Process", order = 0, upstreams = [] }
-
-
-processDesc : Desc Process
-processDesc =
-    Desc.object Process <|
-        Desc.field "name" .name Desc.string
-            >> Desc.field "order" .order Desc.float
-            >> Desc.field "upstreams" .upstreams (Desc.list Desc.string)
 
 
 defaultProcesses : List Process
@@ -248,24 +205,9 @@ processList processs ids =
 -- Part
 
 
-type alias Part =
-    { name : String
-    , order : Float
-    , parent : Maybe SelfId
-    }
-
-
 nullPart : Part
 nullPart =
     { name = "Null Part", order = 0, parent = Nothing }
-
-
-partDesc : Desc Part
-partDesc =
-    Desc.object Part <|
-        Desc.field "name" .name Desc.string
-            >> Desc.field "order" .order Desc.float
-            >> Desc.option "parent" .parent Desc.string
 
 
 partList :
@@ -388,3 +330,83 @@ selectionTitle processes parts works_ selection =
                     (\min max -> min.name ++ " 〜 " ++ max.name)
                     (List.minimumBy .order selecteds)
                     (List.maximumBy .order selecteds)
+
+
+
+-- Updaters
+
+
+type Update
+    = Add (Id Process) (Id Part) String
+    | FolderCreated (Id Process) (Id Part) GDrive.FileMeta
+    | SetStaffs (List (Id User))
+    | SetReviewers (List (Id User))
+    | SetBelongsTo (List (Id Part))
+    | Delete
+    | None
+
+
+update :
+    Auth
+    -> Id Work
+    -> (Id Work -> Lens Root Data Doc Document)
+    -> Update
+    -> Updater Data Update
+update auth workId lens_ upd =
+    let
+        lens =
+            lens_ workId
+    in
+    case upd of
+        Add processId partId name ->
+            Update.command <|
+                \_ ->
+                    GDrive.createFolder auth.token
+                        name
+                        [ unId processId ]
+                        |> Cmd.map
+                            (Result.map
+                                (FolderCreated processId partId)
+                                >> Result.withDefault None
+                            )
+
+        FolderCreated processId partId folder ->
+            Update.set (lens_ <| Id.fromString folder.id) workDesc <|
+                init (Id.fromString folder.id)
+                    folder.name
+                    processId
+                    partId
+
+        SetStaffs users ->
+            Update.modify lens workDesc <|
+                \work -> { work | staffs = userRefs users }
+
+        SetReviewers users ->
+            Update.modify lens workDesc <|
+                \work -> { work | reviewers = userRefs users }
+
+        SetBelongsTo parts ->
+            Update.modify lens workDesc <|
+                \work -> { work | belongsTo = parts }
+
+        Delete ->
+            Update.all
+                [ Update.delete lens workDesc
+                , Update.command <|
+                    \_ ->
+                        GDrive.files_update auth.token
+                            (unId workId)
+                            { gdriveUpdate | trashed = Just True }
+                            |> Cmd.map (\_ -> None)
+                ]
+
+        None ->
+            Update.none
+
+
+userRefs : List (Id User) -> List User.Reference
+userRefs =
+    List.map <|
+        \id ->
+            Firestore.ref <|
+                Path.fromIds [ "users", unId id ]

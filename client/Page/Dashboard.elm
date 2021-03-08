@@ -1,17 +1,13 @@
 module Page.Dashboard exposing (..)
 
-import Data exposing (Auth, Data)
-import Data.Client exposing (Client)
-import Data.Project exposing (Project)
-import Data.User exposing (User)
-import Firestore exposing (Firestore)
+import Data exposing (..)
+import Firestore
 import Firestore.Access as Access exposing (Accessor)
 import Firestore.Update as Update exposing (Updater)
-import Html exposing (Html, a, div, i, span, text)
-import Html.Attributes as Html exposing (class, href)
-import Html.Events exposing (onClick)
+import Html exposing (Html, div, span, text)
+import Html.Attributes as Html exposing (class)
+import Html.Events
 import Util exposing (..)
-import View.Button as Button
 
 
 type Model

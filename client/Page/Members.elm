@@ -1,8 +1,7 @@
 module Page.Members exposing (..)
 
-import Data exposing (Auth, Data)
-import Data.Project as Project exposing (Project)
-import Data.User exposing (User)
+import Data exposing (..)
+import Data.Project as Project
 import Firestore exposing (Id)
 import Firestore.Access as Access exposing (Accessor)
 import Firestore.Lens as Lens exposing (o)
@@ -32,8 +31,7 @@ init =
 
 type Msg
     = ModalState Modal
-    | InviteUser String
-    | InvitedUser (Maybe User)
+    | ProjectUpdate Project.Update
 
 
 update :
@@ -47,25 +45,21 @@ update auth msg projectId model =
         ModalState modal ->
             ( { model | modal = modal }, Update.none )
 
-        InviteUser email ->
-            ( { model | modal = Hidden }
-            , Data.inviteMember auth projectId email
-                |> Update.map InvitedUser
+        ProjectUpdate upd ->
+            ( model
+            , Project.update auth projectId upd |> Update.map ProjectUpdate
             )
-
-        InvitedUser _ ->
-            ( model, Update.none )
 
 
 view : Auth -> Model -> Data -> Project -> Accessor Data (Html Msg)
 view auth model data project =
     flip Access.map
-        (Access.access (o (Data.projectMembers project) Lens.gets) data)
+        (Access.access (o (Project.members project) Lens.gets) data)
     <|
         \members ->
             div []
                 [ table [ class "ui sinigle line table" ]
-                    [ thead [] [ tableHeader <| Data.myRole project auth ]
+                    [ thead [] [ tableHeader <| Project.myRole project auth ]
                     , tbody [] <| List.map (tableRow project) members
                     ]
                 , modalView model project
@@ -95,7 +89,7 @@ tableRow project user =
         , td []
             [ div [ class "header" ] [ text user.name ] ]
         , td [ class "collapsing" ]
-            [ case Data.userRole project <| Id.self user of
+            [ case Project.userRole project <| Id.self user of
                 Project.Owner ->
                     text "プロジェクトオーナー"
 
@@ -114,12 +108,6 @@ modalView model project =
         [ boolAttr "show" <| model.modal /= Hidden
         , class "ui small modal"
         , Events.on "hide" <| Decode.succeed <| ModalState Hidden
-
-        -- , Events.on "approve" <|
-        --     Decode.succeed <|
-        --         case model.modal of
-        --             _ ->
-        --                 None
         ]
     <|
         case model.modal of
@@ -140,7 +128,7 @@ modalView model project =
                     , button
                         [ class "ui primary labeled right floated icon button"
                         , classIf (email == "") "disabled"
-                        , onClick <| InviteUser email
+                        , onClick <| ProjectUpdate <| Project.InviteMember email
                         ]
                         [ icon "user plus", text "招待" ]
                     ]
