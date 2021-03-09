@@ -43,7 +43,7 @@ type Msg
     = ProjectsMsg Projects.Msg
     | DashboardMsg Dashboard.Msg
     | OverviewMsg (Id Project) Overview.Msg
-    | WorkMsg Work.Msg
+    | WorkMsg (Id Project) Work.Msg
     | MembersMsg (Id Project) Members.Msg
     | SignOut
 
@@ -94,8 +94,7 @@ initialize : Auth -> Model -> Cmd Msg
 initialize auth model =
     case model.page of
         Work m ->
-            Work.initialize auth m
-                |> Cmd.map WorkMsg
+            Work.initialize auth m |> Cmd.map (WorkMsg Id.null)
 
         _ ->
             Cmd.none
@@ -126,13 +125,13 @@ update auth message model =
             , Update.map (OverviewMsg projectId) upd
             )
 
-        ( WorkMsg msg, Work m ) ->
+        ( WorkMsg projectId msg, Work m ) ->
             let
                 ( m_, upd ) =
-                    Work.update auth msg { project = model.project } m
+                    Work.update auth msg projectId m
             in
             ( { model | page = Work m_ }
-            , Update.map WorkMsg upd
+            , Update.map (WorkMsg projectId) upd
             )
 
         ( MembersMsg projectId msg, Members m ) ->
@@ -193,8 +192,11 @@ view auth model data =
                     Work m ->
                         Access.fromJust project
                             |> Access.andThen
-                                (Work.view auth m data)
-                            |> Access.map (map WorkMsg)
+                                (\p ->
+                                    Work.view auth m data p
+                                        |> Access.map
+                                            (map <| WorkMsg <| Id.self p)
+                                )
 
                     Members m ->
                         Access.fromJust project

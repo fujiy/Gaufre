@@ -3,7 +3,7 @@ module Data exposing (..)
 import Array exposing (Array)
 import Browser.Navigation as Nav
 import Firestore exposing (..)
-import Firestore.Desc as Desc exposing (Desc, DocumentDesc, FirestoreDesc)
+import Firestore.Desc as Desc exposing (Desc, DocumentDesc, FirestoreDesc, field, optional)
 import Firestore.Lens as Lens exposing (o, where_)
 import Firestore.Path as Path
 import Firestore.Path.Id as Id exposing (Id, SelfId, unId)
@@ -66,7 +66,10 @@ type alias Work =
     , belongsTo : List (Id Part)
     , staffs : List (Reference () User)
     , reviewers : List (Reference () User)
+    , upstreams : List WorkRef
     , waitingFor : List WorkRef
+    , working : List (Reference () User)
+    , reviewing : List (Reference () User)
     }
 
 
@@ -85,7 +88,7 @@ type alias Part =
 
 
 type WorkRef
-    = Ref (Reference () Work)
+    = WorkRef (Reference () Work)
 
 
 
@@ -104,15 +107,15 @@ desc =
 userDesc : DocumentDesc () User
 userDesc =
     Desc.documentWithId User <|
-        Desc.field "name" .name Desc.string
-            >> Desc.field "image" .image Desc.string
-            >> Desc.field "email" .email Desc.string
+        field "name" .name Desc.string
+            >> field "image" .image Desc.string
+            >> field "email" .email Desc.string
 
 
 clientDesc : DocumentDesc () Client
 clientDesc =
     Desc.document Client <|
-        Desc.field "projects"
+        field "projects"
             .projects
             (Desc.array Desc.reference)
 
@@ -121,47 +124,50 @@ projectDesc : DocumentDesc ProjectSub Project
 projectDesc =
     Desc.documentWithIdAndSubs
         Project
-        (Desc.field "name" .name Desc.string
-            >> Desc.field "members" .members (Desc.list Desc.reference)
-            >> Desc.field "admins" .admins (Desc.list Desc.reference)
-            >> Desc.field "owner" .owner Desc.reference
-            >> Desc.field "proesses" .processes (Desc.idMap processDesc)
-            >> Desc.field "parts" .parts (Desc.idMap partDesc)
+        (field "name" .name Desc.string
+            >> field "members" .members Desc.references
+            >> field "admins" .admins Desc.references
+            >> field "owner" .owner Desc.reference
+            >> field "proesses" .processes (Desc.idMap processDesc)
+            >> field "parts" .parts (Desc.idMap partDesc)
         )
         ProjectSub
         (Desc.collection "works" .works workDesc)
 
 
+workRefDesc : Desc WorkRef
+workRefDesc =
+    Desc.map (Desc.iso WorkRef (\(WorkRef r) -> r)) Desc.reference
+
+
 workDesc : DocumentDesc () Work
 workDesc =
     Desc.documentWithId Work <|
-        Desc.field "name" .name Desc.string
-            >> Desc.field "process" .process Desc.id
-            >> Desc.field "belongsTo" .belongsTo (Desc.list Desc.id)
-            >> Desc.field "staffs" .staffs (Desc.list Desc.reference)
-            >> Desc.field "reviewers" .reviewers (Desc.list Desc.reference)
-            >> Desc.optionWithDefault "waitingFor"
-                .waitingFor
-                []
-                (Desc.list <|
-                    Desc.map (Desc.iso Ref (\(Ref r) -> r)) Desc.reference
-                )
+        field "name" .name Desc.string
+            >> field "process" .process Desc.id
+            >> field "belongsTo" .belongsTo Desc.ids
+            >> optional "staffs" .staffs [] Desc.references
+            >> optional "reviewers" .reviewers [] Desc.references
+            >> optional "upstreams" .upstreams [] (Desc.list workRefDesc)
+            >> optional "waitingFor" .waitingFor [] (Desc.list workRefDesc)
+            >> optional "working" .working [] Desc.references
+            >> optional "reviewing" .reviewing [] Desc.references
 
 
 processDesc : Desc Process
 processDesc =
     Desc.object Process <|
-        Desc.field "name" .name Desc.string
-            >> Desc.field "order" .order Desc.float
-            >> Desc.field "upstreams" .upstreams (Desc.list Desc.string)
+        field "name" .name Desc.string
+            >> field "order" .order Desc.float
+            >> field "upstreams" .upstreams (Desc.list Desc.string)
 
 
 partDesc : Desc Part
 partDesc =
     Desc.object Part <|
-        Desc.field "name" .name Desc.string
-            >> Desc.field "order" .order Desc.float
-            >> Desc.option "parent" .parent Desc.string
+        field "name" .name Desc.string
+            >> field "order" .order Desc.float
+            >> Desc.maybe "parent" .parent Desc.string
 
 
 

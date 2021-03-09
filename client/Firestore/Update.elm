@@ -83,6 +83,11 @@ map f upd =
             }
 
 
+for : List a -> (a -> Updater b msg) -> Updater b msg
+for xs f =
+    List.map f xs |> all
+
+
 fromDoc : Internal.Updater Root Doc a -> Updater a msg
 fromDoc (Internal.Updater f) =
     Updater <|

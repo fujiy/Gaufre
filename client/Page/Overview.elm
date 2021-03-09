@@ -18,7 +18,7 @@ import Firestore.Remote exposing (Remote(..))
 import Firestore.Update as Update exposing (Updater)
 import GDrive
 import Html exposing (Html, button, div, input, label, node, table, td, text, th, thead, tr)
-import Html.Attributes exposing (checked, class, colspan, placeholder, rowspan, style, type_, value)
+import Html.Attributes as Attr exposing (checked, class, colspan, placeholder, rowspan, style, type_, value)
 import Html.Events exposing (onCheck, onClick, onDoubleClick, onInput)
 import Html.Keyed as Keyed
 import List.Extra as List
@@ -39,7 +39,7 @@ type Modal
     = Hidden
     | AddPartModal (IdMap.Map Process ( Process, Bool )) (Id Part) Part
     | AddWorkModal (Id Process) (Id Part) String
-    | ProcessSettingModal (Id Process)
+    | ProcessSettingModal (Id Process) Bool
       -- | PartSettingModal (Id Part)
     | WorkSettingModal (Id Work)
     | DeleteWorkModal (Id Work)
@@ -345,6 +345,9 @@ workCell model partIds process partId part work =
 
         selectedOnly =
             model.selection.works == IdSet.singleton (Id.self work)
+
+        status =
+            Work.getStatus work
     in
     case partRowSpan partIds partId work of
         0 ->
@@ -354,6 +357,7 @@ workCell model partIds process partId part work =
             td
                 [ class "center aligned"
                 , classIf selected "active"
+                , classIf (status == Work.Complete) "positive"
                 , style "cursor" "pointer"
                 , rowspan n
                 , onMouseDownStop <|
@@ -361,7 +365,7 @@ workCell model partIds process partId part work =
                 , onDragEnter <| SelectWork (Id.self work) (not selected) False
                 , onDoubleClick <| MoveToWork process part work
                 ]
-                [ icon <| Work.iconClass <| Work.getStatus work ]
+                [ icon <| Work.iconClass status ]
 
 
 partRowSpan : List (Id Part) -> Id Part -> Work -> Int
@@ -479,7 +483,7 @@ actions model project role members works =
                                 [ class "ui right floated circular icon button"
                                 , onClick <|
                                     ModalState
-                                        (ProcessSettingModal processId)
+                                        (ProcessSettingModal processId False)
                                 ]
                                 [ icon "cog" ]
 
@@ -617,11 +621,13 @@ modalView model project workMap works =
                                     [ div [ class "ui checkbox" ]
                                         [ input
                                             [ type_ "checkbox"
+                                            , Attr.id <| unId pid
                                             , checked add
                                             , onCheck <| checkProcess pid
                                             ]
                                             []
-                                        , label [] [ text process.name ]
+                                        , label [ Attr.for <| unId pid ]
+                                            [ text process.name ]
                                         ]
                                     ]
                     ]
@@ -663,7 +669,7 @@ modalView model project workMap works =
                     ]
                 ]
 
-            ProcessSettingModal processId ->
+            ProcessSettingModal processId updateExistingWorks ->
                 case IdMap.get processId project.processes of
                     Just process ->
                         [ div [ class "header" ]
@@ -674,8 +680,26 @@ modalView model project workMap works =
                                 (List.map Id.selfId process.upstreams)
                                 |> Html.map
                                     (ProjectUpdate
-                                        << Project.SetProcessUpstreams processId
+                                        << Project.SetProcessUpstreams
+                                            updateExistingWorks
+                                            processId
                                     )
+                            , div
+                                [ class "ui checkbox"
+                                , style "margin-left" "2em"
+                                ]
+                                [ input
+                                    [ type_ "checkbox"
+                                    , Attr.id "update-existing"
+                                    , checked updateExistingWorks
+                                    , onCheck <|
+                                        ModalState
+                                            << ProcessSettingModal processId
+                                    ]
+                                    []
+                                , label [ Attr.for "update-existing" ]
+                                    [ text "既存の作業に適用する" ]
+                                ]
                             ]
                         , div [ class "actions" ]
                             [ button [ class "ui positive button" ]
@@ -717,6 +741,16 @@ modalView model project workMap works =
                                         << Work.SetBelongsTo
                                     )
                             ]
+
+                        -- , div [ class "content" ]
+                        --     [ text "前の工程："
+                        --     , Work.processList project.processes
+                        --         (List.map Id.selfId process.upstreams)
+                        --         |> Html.map
+                        --             (WorkUpdate
+                        --                 << Work.SetUpstreamProcesses
+                        --             )
+                        --     ]
                         , div [ class "content" ] <|
                             [ button
                                 [ class "ui negative button"

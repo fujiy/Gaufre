@@ -113,13 +113,13 @@ initialize auth model =
 update :
     Auth
     -> Msg
-    -> { project : Int }
+    -> Id Project
     -> Model
     -> ( Model, Updater Data Msg )
-update auth msg m model =
+update auth msg projectId model =
     let
         projectLens =
-            Client.currentProject auth m.project
+            Data.project projectId
     in
     case msg of
         GotFiles append files__ ->
@@ -211,11 +211,11 @@ update auth msg m model =
 
         WorkUpdate upd ->
             ( model
-            , let
-                lens id =
-                    o projectLens <| Project.work id
-              in
-              Work.update auth model.workId lens upd
+            , Work.update auth
+                projectId
+                model.workId
+                (o projectLens Project.works)
+                upd
                 |> Update.map WorkUpdate
             )
 

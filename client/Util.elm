@@ -8,6 +8,8 @@ import Html.Attributes exposing (attribute, class, style)
 import Html.Events as Events exposing (stopPropagationOn)
 import Json.Decode as Decode
 import List
+import List.Extra as List
+import Set
 
 
 uncurry : (a -> b -> c) -> ( a, b ) -> c
@@ -52,6 +54,11 @@ uncons arr =
     Array.get 0 ls
         |> Maybe.map
             (\a -> ( a, rs ))
+
+
+diff : List a -> List a -> List a
+diff xs ys =
+    List.filterNot (flip List.member ys) xs
 
 
 boolAttr : String -> Bool -> Attribute msg

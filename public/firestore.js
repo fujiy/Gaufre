@@ -124,11 +124,7 @@ function initialize(app) {
             includeMetadataChanges: true,
           },
           (querySnapshot) => {
-            if (
-              querySnapshot.metadata.hasPendingWrites ||
-              querySnapshot.metadata.fromCache
-            )
-              return;
+            if (querySnapshot.metadata.hasPendingWrites) return;
 
             const map = { item: null, sub: [], q: [] };
             querySnapshot.docChanges().forEach((change) => {
@@ -157,7 +153,7 @@ function initialize(app) {
             sendSub({ updates: updates });
 
             tree._startingUp = false;
-            if (tree._unlisten && !doc.metadata.fromCache) {
+            if (tree._unlisten && !querySnapshot.metadata.fromCache) {
               tree._listener();
               tree._listener = null;
             }
@@ -196,7 +192,7 @@ function initialize(app) {
         tree._listener = ref.onSnapshot(
           { includeMetadataChanges: true },
           (doc) => {
-            if (doc.metadata.hasPendingWrites || doc.metadata.fromCache) return;
+            if (doc.metadata.hasPendingWrites) return;
 
             const updates = builder({ item: makeDoc(doc), sub: [] });
 

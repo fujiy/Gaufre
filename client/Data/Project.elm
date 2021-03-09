@@ -189,7 +189,7 @@ type Update
     | AddProcess Process GDrive.FileMeta
     | AddPart (List (Id Process)) (Id Part) Part
     | InviteMember String
-    | SetProcessUpstreams (Id Process) (List (Id Process))
+    | SetProcessUpstreams Bool (Id Process) (List (Id Process))
     | WorkUpdate (List (Id Work)) Work.Update
     | None
 
@@ -305,29 +305,45 @@ update auth projectId upd =
                     |> Update.batch
                 ]
 
-        SetProcessUpstreams processId upstreams ->
-            Update.modify lens projectDesc <|
-                \project ->
-                    { project
-                        | processes =
-                            IdMap.modify processId
-                                (\process ->
-                                    { process
-                                        | upstreams =
-                                            List.map unId upstreams
-                                    }
-                                )
-                                project.processes
-                    }
+        SetProcessUpstreams updateExisting processId upstreams ->
+            Update.all
+                [ Update.modify lens projectDesc <|
+                    \project ->
+                        { project
+                            | processes =
+                                IdMap.modify processId
+                                    (\process ->
+                                        { process
+                                            | upstreams =
+                                                List.map unId upstreams
+                                        }
+                                    )
+                                    project.processes
+                        }
+                , if updateExisting then
+                    Update.andThen
+                        (Access.access
+                            (o lens <|
+                                o works <|
+                                    o (Work.processIs processId) Lens.getAll
+                            )
+                        )
+                        (\ws ->
+                            Update.for ws <|
+                                \w ->
+                                    Update.succeed <|
+                                        WorkUpdate [ Id.self w ] <|
+                                            Work.SetUpstreamProcesses upstreams
+                        )
+
+                  else
+                    Update.none
+                ]
 
         WorkUpdate ids wupd ->
             List.map
                 (\workId ->
-                    let
-                        lens_ id =
-                            o lens <| work id
-                    in
-                    Work.update auth workId lens_ wupd
+                    Work.update auth projectId workId (o lens works) wupd
                         |> Update.map (WorkUpdate [ workId ])
                 )
                 ids

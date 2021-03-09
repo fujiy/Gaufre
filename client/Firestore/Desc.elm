@@ -262,6 +262,11 @@ reference =
         )
 
 
+references : Desc (List (Reference s r))
+references =
+    list reference
+
+
 remote : Desc a -> Desc (Remote a)
 remote d =
     Desc (Remote.encode d.encoder) (Remote.decode d.decoder)
@@ -270,6 +275,11 @@ remote d =
 id : Desc (Id a)
 id =
     map (Iso Id (\(Id s) -> s)) string
+
+
+ids : Desc (List (Id a))
+ids =
+    list id
 
 
 pathMap : Desc a -> Desc (PathMap.Map a)
@@ -462,13 +472,13 @@ field name getter d (Field m) =
         }
 
 
-option :
+maybe :
     String
     -> (r -> Maybe a)
     -> Desc a
     -> Field (Maybe a -> l) r
     -> Field l r
-option name getter d (Field m) =
+maybe name getter d (Field m) =
     Field
         { encoders =
             ( name, getter >> Maybe.unwrap Encode.null d.encoder )
@@ -480,14 +490,14 @@ option name getter d (Field m) =
         }
 
 
-optionWithDefault :
+optional :
     String
     -> (r -> a)
     -> a
     -> Desc a
     -> Field (a -> l) r
     -> Field l r
-optionWithDefault name getter default d (Field m) =
+optional name getter default d (Field m) =
     Field
         { encoders =
             ( name, getter >> d.encoder )
