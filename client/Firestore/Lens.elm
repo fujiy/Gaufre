@@ -331,16 +331,23 @@ where_ field qop desc a =
             \(Collection col) ->
                 Accessor
                     (Slice.query field op value)
-                    (Dict.get key col.q
-                        |> Maybe.withDefault
-                            (Collection
-                                { col
-                                    | docs = IdMap.empty
-                                    , q = Dict.empty
-                                    , loading = True
-                                }
-                            )
-                        |> UpToDate
+                    (let
+                        (Collection qcol) =
+                            Dict.get key col.q
+                                |> Maybe.withDefault
+                                    (Collection
+                                        { col
+                                            | docs = IdMap.empty
+                                            , q = Dict.empty
+                                            , loading = True
+                                        }
+                                    )
+                     in
+                     if col.loading then
+                        Loading
+
+                     else
+                        UpToDate <| Collection qcol
                     )
         , update =
             \u qc ->
@@ -372,7 +379,7 @@ getAllRemote =
                             IdMap.items col.docs
                                 |> List.map (\(Document _ r) -> r)
                      in
-                     if List.isEmpty ds && col.loading then
+                     if col.loading then
                         Loading
 
                      else
@@ -401,7 +408,7 @@ getAll =
                                 |> List.filterMap
                                     (\(Document _ r) -> Remote.toMaybe r)
                      in
-                     if List.isEmpty ds && col.loading then
+                     if col.loading then
                         Loading
 
                      else

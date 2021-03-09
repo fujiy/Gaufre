@@ -68,6 +68,30 @@ title processes parts work =
             ++ process.name
 
 
+worksTitle :
+    IdMap.Map Process Process
+    -> IdMap.Map Part Part
+    -> IdMap.Map Work Work
+    -> List (Id Work)
+    -> String
+worksTitle processes parts works ids =
+    Maybe.withDefault "" <|
+        case ids of
+            [] ->
+                Nothing
+
+            [ id ] ->
+                IdMap.get id works
+                    |> Maybe.map (title processes parts)
+
+            _ ->
+                let
+                    n =
+                        String.fromInt <| List.length ids
+                in
+                Just <| n ++ "件の作業"
+
+
 getStatus : Work -> Status
 getStatus work =
     if List.isEmpty work.staffs then
@@ -314,29 +338,18 @@ isSelected selection work_ =
 selectionTitle :
     IdMap.Map Process Process
     -> IdMap.Map Part Part
-    -> List Work
+    -> IdMap.Map Work Work
     -> Selection
     -> String
-selectionTitle processes parts works_ selection =
+selectionTitle processes parts works selection =
     Maybe.withDefault "" <|
         case IdSet.toList selection.processes of
             [] ->
                 case IdSet.toList selection.parts of
                     [] ->
-                        case IdSet.toList selection.works of
-                            [] ->
-                                Nothing
-
-                            [ id ] ->
-                                List.find (Id.self >> (==) id) works_
-                                    |> Maybe.map (title processes parts)
-
-                            ids ->
-                                let
-                                    n =
-                                        String.fromInt <| List.length ids
-                                in
-                                Just <| n ++ "件の作業"
+                        Just <|
+                            worksTitle processes parts works <|
+                                IdSet.toList selection.works
 
                     [ id ] ->
                         IdMap.get id parts |> Maybe.map .name

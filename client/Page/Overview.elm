@@ -40,9 +40,10 @@ type Modal
     | AddPartModal (IdMap.Map Process ( Process, Bool )) (Id Part) Part
     | AddWorkModal (Id Process) (Id Part) String
     | ProcessSettingModal (Id Process) Bool
-      -- | PartSettingModal (Id Part)
-    | WorkSettingModal (Id Work)
-    | DeleteWorkModal (Id Work)
+    | PartSettingModal (Id Part)
+    | WorkSettingModal (List (Id Work))
+    | DeleteWorkModal (List (Id Work))
+    | DeletePartModal (Id Part)
 
 
 init : Model
@@ -238,7 +239,7 @@ view auth model data project =
                             ++ addPartButton
                     ]
                 , actions model project role members works_
-                , modalView model project works works_
+                , modalView model project works <| IdMap.fromListSelf works_
                 ]
 
 
@@ -459,65 +460,72 @@ actions model project role members works =
         , style "margin" "0"
         , style "height" "100vh"
         ]
-    <|
-        if List.isEmpty selection then
-            []
+        [ div [ class "content" ]
+            [ when authority.editStructure <|
+                case
+                    ( selection
+                    , IdSet.toList model.selection.processes
+                    , IdSet.toList model.selection.parts
+                    )
+                of
+                    ( _, [ processId ], _ ) ->
+                        button
+                            [ class "ui right floated circular icon button"
+                            , onClick <|
+                                ModalState <|
+                                    ProcessSettingModal processId False
+                            ]
+                            [ icon "cog" ]
 
-        else
-            [ div [ class "content" ]
-                [ when authority.editStructure <|
-                    case
-                        ( selection
-                        , IdSet.toList model.selection.processes
-                        , IdSet.toList model.selection.parts
-                        )
-                    of
-                        ( [ work ], _, _ ) ->
-                            button
-                                [ class "ui right floated circular icon button"
-                                , onClick <|
-                                    ModalState
-                                        (WorkSettingModal <| Id.self work)
-                                ]
-                                [ icon "cog" ]
+                    ( _, _, [ partId ] ) ->
+                        button
+                            [ class "ui right floated circular icon button"
+                            , onClick <|
+                                ModalState <|
+                                    PartSettingModal partId
+                            ]
+                            [ icon "cog" ]
 
-                        ( _, [ processId ], _ ) ->
-                            button
-                                [ class "ui right floated circular icon button"
-                                , onClick <|
-                                    ModalState
-                                        (ProcessSettingModal processId False)
-                                ]
-                                [ icon "cog" ]
-
-                        _ ->
-                            text ""
-                , div [ class "header" ]
-                    [ text <|
-                        Work.selectionTitle
-                            project.processes
-                            project.parts
-                            works
-                            model.selection
-                    ]
-                , div [ class "description" ] <|
-                    List.map Work.statusLabel statuses
-                , if List.member Work.Waiting statuses then
-                    Html.map (\_ -> None) <|
-                        div [ class "description" ] <|
-                            span [] [ text "未完了の前工程：" ]
-                                :: List.map
-                                    (Work.waitingStatuses
-                                        project.processes
-                                        project.parts
-                                        allWorks
+                    ( _ :: _, _, _ ) ->
+                        button
+                            [ class "ui right floated circular icon button"
+                            , onClick <|
+                                ModalState <|
+                                    (WorkSettingModal <|
+                                        List.map Id.self selection
                                     )
-                                    selection
+                            ]
+                            [ icon "cog" ]
 
-                  else
-                    text ""
+                    _ ->
+                        text ""
+            , div [ class "header" ]
+                [ text <|
+                    Work.selectionTitle
+                        project.processes
+                        project.parts
+                        allWorks
+                        model.selection
                 ]
-            , div [ class "content" ]
+            , div [ class "description" ] <|
+                List.map Work.statusLabel statuses
+            , if List.member Work.Waiting statuses then
+                Html.map (\_ -> None) <|
+                    div [ class "description" ] <|
+                        span [] [ text "未完了の前工程：" ]
+                            :: List.map
+                                (Work.waitingStatuses
+                                    project.processes
+                                    project.parts
+                                    allWorks
+                                )
+                                selection
+
+              else
+                text ""
+            ]
+        , when (not <| List.isEmpty selection) <|
+            div [ class "content" ]
                 [ div [ class "header" ] [ text "メンバー" ]
                 , Html.p []
                     [ text "担当："
@@ -538,9 +546,9 @@ actions model project role members works =
                             (WorkUpdate selectedIds << Work.SetReviewers)
                     ]
                 ]
-            , div [ class "content" ]
-                [ div [ class "header" ] [ text "スケジュール" ] ]
-            ]
+        , div [ class "content" ]
+            [ div [ class "header" ] [ text "スケジュール" ] ]
+        ]
 
 
 addPart : Project -> Msg
@@ -559,9 +567,9 @@ modalView :
     Model
     -> Project
     -> IdMap.Map Process (IdMap.Map Part Work)
-    -> List Work
+    -> IdMap.Map Work Work
     -> Html Msg
-modalView model project workMap works =
+modalView model project workMap allWorks =
     node "ui-modal"
         [ class "ui small modal"
         , boolAttr "show" <| model.modal /= Hidden
@@ -595,8 +603,8 @@ modalView model project workMap works =
                         Nothing ->
                             None
 
-                DeleteWorkModal id ->
-                    WorkUpdate [ id ] Work.Delete
+                DeleteWorkModal ids ->
+                    WorkUpdate ids Work.Delete
 
                 _ ->
                     None
@@ -734,16 +742,45 @@ modalView model project workMap works =
                     Nothing ->
                         []
 
-            WorkSettingModal workId ->
-                case List.find (Id.self >> (==) workId) works of
-                    Just work ->
-                        let
-                            title =
-                                Work.title project.processes project.parts work
-                        in
+            PartSettingModal partId ->
+                case IdMap.get partId project.parts of
+                    Just part ->
                         [ div [ class "header" ]
-                            [ text <| title ++ " の設定" ]
+                            [ text <| part.name ++ " の設定" ]
                         , div [ class "content" ] <|
+                            [ button
+                                [ class "ui negative button"
+                                , onClick <|
+                                    ModalState <|
+                                        DeletePartModal partId
+                                ]
+                                [ text "カットを削除" ]
+                            ]
+                        , div [ class "actions" ]
+                            [ button [ class "ui positive button" ]
+                                [ text "完了" ]
+                            ]
+                        ]
+
+                    Nothing ->
+                        []
+
+            WorkSettingModal workIds ->
+                let
+                    works =
+                        List.filterMap (flip IdMap.get allWorks) workIds
+
+                    title =
+                        Work.worksTitle project.processes
+                            project.parts
+                            allWorks
+                            workIds
+                in
+                [ div [ class "header" ]
+                    [ text <| title ++ " の設定" ]
+                , case works of
+                    [ work ] ->
+                        div [ class "content" ] <|
                             let
                                 parts =
                                     IdMap.get work.process workMap
@@ -766,39 +803,53 @@ modalView model project workMap works =
                                     )
                             ]
 
-                        -- , div [ class "content" ]
-                        --     [ text "前の工程："
-                        --     , Work.processList project.processes
-                        --         (List.map Id.selfId process.upstreams)
-                        --         |> Html.map
-                        --             (WorkUpdate
-                        --                 << Work.SetUpstreamProcesses
-                        --             )
-                        --     ]
-                        , div [ class "content" ] <|
-                            [ button
-                                [ class "ui negative button"
-                                , onClick <|
-                                    ModalState <|
-                                        DeleteWorkModal workId
-                                ]
-                                [ text "作業を削除" ]
-                            ]
-                        , div [ class "actions" ]
-                            [ button [ class "ui positive button" ]
-                                [ text "完了" ]
-                            ]
+                    _ ->
+                        text ""
+                , div [ class "content" ] <|
+                    [ button
+                        [ class "ui negative button"
+                        , onClick <| ModalState <| DeleteWorkModal workIds
                         ]
+                        [ text "作業を削除" ]
+                    ]
+                , div [ class "actions" ]
+                    [ button [ class "ui positive button" ]
+                        [ text "完了" ]
+                    ]
+                ]
 
-                    Nothing ->
-                        []
+            DeleteWorkModal workIds ->
+                let
+                    title =
+                        Work.worksTitle project.processes
+                            project.parts
+                            allWorks
+                            workIds
+                in
+                [ div [ class "ui icon header" ]
+                    [ icon "trash alternate outline"
+                    , text <| title ++ " を削除"
+                    ]
+                , div [ class "content" ]
+                    [ Html.p [] [ text "本当に削除しますか？" ] ]
+                , div [ class "actions" ]
+                    [ button
+                        [ class "ui negative button"
+                        , onClick <|
+                            WorkUpdate workIds Work.Delete
+                        ]
+                        [ text "削除" ]
+                    , button [ class "ui deny button" ]
+                        [ text "キャンセル" ]
+                    ]
+                ]
 
-            DeleteWorkModal workId ->
-                case List.find (Id.self >> (==) workId) works of
-                    Just work ->
+            DeletePartModal partId ->
+                case IdMap.get partId project.parts of
+                    Just part ->
                         [ div [ class "ui icon header" ]
                             [ icon "trash alternate outline"
-                            , text <| work.name ++ " を削除"
+                            , text <| part.name ++ " を削除"
                             ]
                         , div [ class "content" ]
                             [ Html.p [] [ text "本当に削除しますか？" ] ]
@@ -806,7 +857,8 @@ modalView model project workMap works =
                             [ button
                                 [ class "ui negative button"
                                 , onClick <|
-                                    WorkUpdate [ workId ] Work.Delete
+                                    ProjectUpdate <|
+                                        Project.DeletePart partId
                                 ]
                                 [ text "削除" ]
                             , button [ class "ui deny button" ]
@@ -814,7 +866,7 @@ modalView model project workMap works =
                             ]
                         ]
 
-                    _ ->
+                    Nothing ->
                         []
 
             Hidden ->

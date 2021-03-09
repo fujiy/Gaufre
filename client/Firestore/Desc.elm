@@ -206,11 +206,10 @@ collection name getter (DocumentDesc d) (CollectionDesc c) =
                     Just Clear ->
                         Ok <|
                             Collection
-                                { name = Id name
-                                , empty = d.empty
-                                , loading = True
-                                , docs = IdMap.empty
-                                , q = Dict.empty
+                                { col
+                                    | loading = True
+                                    , docs = IdMap.empty
+                                    , q = Dict.empty
                                 }
 
                     _ ->
@@ -240,7 +239,7 @@ collection name getter (DocumentDesc d) (CollectionDesc c) =
                                                     Ok doc
 
                                                 Just Clear ->
-                                                    Ok Loading
+                                                    Ok doc
 
                                                 Just (Got v) ->
                                                     Decode.decodeValue

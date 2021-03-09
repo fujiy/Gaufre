@@ -44,6 +44,11 @@ modify (Id id) f (Map d) =
     Map <| Dict.update id (Maybe.map f) d
 
 
+remove : Id x -> Map x a -> Map x a
+remove (Id id) (Map d) =
+    Map <| Dict.remove id d
+
+
 toList : Map x a -> List ( Id x, a )
 toList (Map d) =
     Dict.toList d |> List.map (Tuple.mapFirst Id)

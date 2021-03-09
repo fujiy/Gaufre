@@ -189,9 +189,9 @@ type Update
     | Add GDrive.FileMeta
     | AddProcess Process GDrive.FileMeta
     | AddPart (List ( Id Process, Process )) (Id Part) Part
-    | InitPartsUpstreams (Id Part) (List ( Id Process, Process ))
     | InviteMember String
     | SetProcessUpstreams Bool (Id Process) (List (Id Process))
+    | DeletePart (Id Part)
     | WorkUpdate (List (Id Work)) Work.Update
     | AndThen Update Update
     | None
@@ -305,7 +305,6 @@ update auth projectId upd =
                         )
                         Work.None
                     |> WorkUpdate [ Id.null ]
-                    |> AndThen (InitPartsUpstreams partId processes)
                     |> Update.succeed
                 ]
 
@@ -345,32 +344,27 @@ update auth projectId upd =
                     Update.none
                 ]
 
-        InitPartsUpstreams partId processes ->
-            Update.andThen
-                (access
-                    (o lens <| o works <| o (Work.partIs partId) Lens.getAll)
-                )
-                (List.foldr
-                    (\w wupd ->
-                        let
-                            upstreams =
-                                List.find
-                                    (Tuple.first >> (==) w.process)
-                                    processes
-                                    |> Maybe.unwrap []
-                                        (Tuple.second
-                                            >> .upstreams
-                                            >> List.map Id.selfId
-                                        )
-                        in
-                        Work.AndThen wupd <|
-                            Work.OtherWork (Id.self w) <|
-                                Work.SetUpstreamProcesses upstreams
+        DeletePart partId ->
+            Update.all
+                [ Update.map (\_ -> None) <|
+                    Update.modify lens projectDesc <|
+                        \project ->
+                            { project
+                                | parts =
+                                    IdMap.remove partId project.parts
+                            }
+                , Update.andThen
+                    (access
+                        (o lens <|
+                            o works <|
+                                o (Work.partIs partId) Lens.getAll
+                        )
                     )
-                    Work.None
-                    >> WorkUpdate [ Id.null ]
-                    >> Update.succeed
-                )
+                    (\ws ->
+                        Update.succeed <|
+                            WorkUpdate (List.map Id.self ws) Work.Delete
+                    )
+                ]
 
         WorkUpdate ids wupd ->
             List.map
