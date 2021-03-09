@@ -71,6 +71,7 @@ type Msg
     | Authorized Auth User
     | Firestore (Firestore.FirestoreSub Data Msg)
     | Page Page.Msg
+    | None
 
 
 update : Msg -> Model -> ( Model, Cmd Msg )
@@ -86,7 +87,9 @@ update msg model =
                         ( firestore, mview, cmd ) =
                             Firestore.update
                                 firestoreCmdPort
-                                (Client.init auth user)
+                                (Client.init auth user
+                                    |> Update.map (\_ -> None)
+                                )
                                 (pageView auth <| Page.init url)
                                 (Firestore.init Data.desc)
 

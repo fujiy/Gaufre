@@ -17,6 +17,7 @@ type Collection s r
     = Collection
         { name : Id r
         , empty : s
+        , loading : Bool
         , docs : IdMap.Map r (Document s r)
         , q : Dict QueryKey (Collection s r)
         }
@@ -115,6 +116,29 @@ mergeRequest x y =
 
         _ ->
             x
+
+
+isGetRequest : Request -> Maybe ()
+isGetRequest req =
+    case req of
+        None ->
+            Nothing
+
+        _ ->
+            Just ()
+
+
+isUpdateRequest : Request -> Maybe Request
+isUpdateRequest req =
+    case req of
+        None ->
+            Nothing
+
+        Get ->
+            Nothing
+
+        _ ->
+            Just req
 
 
 noUpdates : a -> Updates p q a

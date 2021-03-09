@@ -54,6 +54,13 @@ fromList =
     List.map (Tuple.mapFirst unId) >> Dict.fromList >> Map
 
 
+fromListSelf :
+    List { r | id : String }
+    -> Map { r | id : String } { r | id : String }
+fromListSelf =
+    Dict.fromListBy .id >> Map
+
+
 keys : Map x a -> List (Id x)
 keys (Map d) =
     Dict.keys d |> List.map Id

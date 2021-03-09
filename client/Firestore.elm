@@ -31,6 +31,7 @@ import Firestore.Remote as Remote exposing (Remote(..))
 import Firestore.Update as Update exposing (Updater)
 import Json.Decode as Decode
 import Json.Encode as Encode exposing (Value)
+import Result.Extra exposing (error)
 
 
 type Firestore r msg
@@ -186,12 +187,27 @@ update p updater use (Firestore fs) =
 
         ( listens, unlistens ) =
             PathMap.diff listenings fs.listenings
+
+        clears =
+            PathMap.map (\_ -> Desc.Clear) unlistens
+
+        (FirestoreDesc { applier }) =
+            fs.desc
+
+        ( data, errors ) =
+            case applier clears upds.value of
+                Ok r ->
+                    ( r, fs.errors )
+
+                Err err ->
+                    ( upds.value, err :: fs.errors )
     in
     ( Firestore
         { fs
-            | data = upds.value
+            | data = data
             , listenings = listenings
             , afterwards = upds.afterwards
+            , errors = errors
         }
     , Remote.toMaybe ra
     , Cmd.batch
@@ -210,29 +226,6 @@ render p use =
     update p Update.none use
 
 
-isGetRequest : Request -> Maybe ()
-isGetRequest req =
-    case req of
-        None ->
-            Nothing
-
-        _ ->
-            Just ()
-
-
-isUpdateRequest : Request -> Maybe Request
-isUpdateRequest req =
-    case req of
-        None ->
-            Nothing
-
-        Get ->
-            Nothing
-
-        _ ->
-            Just req
-
-
 type alias Command =
     { listen : Paths
     , unlisten : Paths
@@ -241,7 +234,7 @@ type alias Command =
 
 
 type alias Subscription =
-    { updates : PathMap.Map Value }
+    { updates : PathMap.Map Desc.Update }
 
 
 encodeCommand : Command -> Value
@@ -257,4 +250,4 @@ decodeSubscription : Decode.Decoder Subscription
 decodeSubscription =
     Decode.map Subscription <|
         Decode.field "updates" <|
-            (Desc.pathMap Desc.value).decoder
+            (Desc.pathMap Desc.update).decoder

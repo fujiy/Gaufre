@@ -234,7 +234,14 @@ doc id =
                 Accessor
                     (Slice.doc id)
                     (IdMap.get id col.docs
-                        |> Maybe.withDefault (Document col.empty Loading)
+                        |> Maybe.withDefault
+                            (Document col.empty <|
+                                if col.loading then
+                                    Loading
+
+                                else
+                                    Failure
+                            )
                         |> UpToDate
                     )
         , update =
@@ -243,7 +250,11 @@ doc id =
                     \(Collection col) ->
                         { value =
                             Collection
-                                { col | docs = IdMap.insert id d col.docs }
+                                { col
+                                    | docs =
+                                        IdMap.insert id d col.docs
+                                    , loading = False
+                                }
                         , requests =
                             Slice.addDoc (Slice.doc id) (PathMap.docRootItem u)
                         , afterwards = noUpdater
@@ -323,7 +334,11 @@ where_ field qop desc a =
                     (Dict.get key col.q
                         |> Maybe.withDefault
                             (Collection
-                                { col | docs = IdMap.empty, q = Dict.empty }
+                                { col
+                                    | docs = IdMap.empty
+                                    , q = Dict.empty
+                                    , loading = True
+                                }
                             )
                         |> UpToDate
                     )
@@ -333,7 +348,10 @@ where_ field qop desc a =
                     \(Collection col) ->
                         { value =
                             Collection
-                                { col | q = Dict.insert key qc col.q }
+                                { col
+                                    | q = Dict.insert key qc col.q
+                                    , loading = False
+                                }
                         , requests =
                             Slice.addCol
                                 (Slice.query field op value)
@@ -350,15 +368,15 @@ getAllRemote =
             \(Collection col) ->
                 Accessor Slice.colItem
                     (let
-                        rs =
+                        ds =
                             IdMap.items col.docs
                                 |> List.map (\(Document _ r) -> r)
                      in
-                     if List.isEmpty rs then
+                     if List.isEmpty ds && col.loading then
                         Loading
 
                      else
-                        UpToDate rs
+                        UpToDate ds
                     )
         , update =
             \_ _ ->
@@ -378,16 +396,16 @@ getAll =
             \(Collection col) ->
                 Accessor Slice.colItem
                     (let
-                        rs =
+                        ds =
                             IdMap.items col.docs
                                 |> List.filterMap
                                     (\(Document _ r) -> Remote.toMaybe r)
                      in
-                     if List.isEmpty rs then
+                     if List.isEmpty ds && col.loading then
                         Loading
 
                      else
-                        UpToDate rs
+                        UpToDate ds
                     )
         , update =
             \_ _ ->

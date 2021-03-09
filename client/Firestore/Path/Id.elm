@@ -28,6 +28,11 @@ selfId =
     Id
 
 
+selfIds : List SelfId -> List (Id x)
+selfIds =
+    List.map Id
+
+
 fromString : String -> Id x
 fromString =
     Id

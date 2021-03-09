@@ -1,8 +1,9 @@
 module Data.Work exposing (..)
 
 import Data exposing (..)
+import Dict
 import Firestore exposing (..)
-import Firestore.Access as Access
+import Firestore.Access as Access exposing (access)
 import Firestore.Desc as Desc
 import Firestore.Lens as Lens exposing (o, where_)
 import Firestore.Path as Path
@@ -13,6 +14,7 @@ import Firestore.Update as Update exposing (Updater)
 import GDrive
 import Html exposing (Html, div, input, node, span, text)
 import Html.Attributes as Attr exposing (attribute, class, type_)
+import Html.Events exposing (onClick)
 import List.Extra as List
 import Util exposing (diff, flip, icon, onChangeValues)
 
@@ -35,21 +37,6 @@ type alias Collection =
 
 type alias Document =
     Firestore.Document () Work
-
-
-init : Id Work -> String -> Id Process -> Id Part -> Work
-init id name processId partId =
-    { id = unId id
-    , name = name
-    , process = processId
-    , belongsTo = [ partId ]
-    , staffs = []
-    , reviewers = []
-    , upstreams = []
-    , waitingFor = []
-    , working = []
-    , reviewing = []
-    }
 
 
 title : IdMap.Map Process Process -> IdMap.Map Part Part -> Work -> String
@@ -142,6 +129,41 @@ statusLabel status =
         [ icon <| iconClass status
         , text header
         ]
+
+
+workLabel :
+    IdMap.Map Process Process
+    -> IdMap.Map Part Part
+    -> Work
+    -> Html (Id Work)
+workLabel processes parts work =
+    let
+        status =
+            getStatus work
+    in
+    Html.a
+        [ class "ui label"
+        , onClick <| Id.self work
+        ]
+        [ icon <| iconClass status
+        , text <| title processes parts work
+        ]
+
+
+waitingStatuses :
+    IdMap.Map Process Process
+    -> IdMap.Map Part Part
+    -> IdMap.Map Work Work
+    -> Work
+    -> Html (Id Work)
+waitingStatuses processes parts works work =
+    div [ class "ui horizontal list" ] <|
+        flip List.filterMap work.waitingFor <|
+            \(WorkRef r) ->
+                flip Maybe.map (IdMap.get (getId r) works) <|
+                    \waiting ->
+                        div [ class "item" ]
+                            [ workLabel processes parts waiting ]
 
 
 statusNumber : Status -> Int
@@ -350,9 +372,19 @@ selectionTitle processes parts works_ selection =
 -- Lenses
 
 
+ref : Id Project -> Id Work -> Reference
+ref pid id =
+    Firestore.ref <| Path.fromIds [ "projects", unId pid, "works", unId id ]
+
+
 processIs : Id Process -> Lens Col Collection Col Collection
 processIs id =
     where_ "process" Lens.EQ Desc.id id
+
+
+partIs : Id Part -> Lens Col Collection Col Collection
+partIs id =
+    where_ "belongsTo" Lens.CONTAINS Desc.id id
 
 
 processIn : List (Id Process) -> Lens Col Collection Col Collection
@@ -365,19 +397,26 @@ samePartAs work =
     where_ "belongsTo" Lens.CONTAINS_ANY Desc.ids work.belongsTo
 
 
+downstreamOf : Id Work -> Lens Col Collection Col Collection
+downstreamOf id =
+    where_ "upstreams" Lens.CONTAINS Desc.id id
+
+
 
 -- Updaters
 
 
 type Update
-    = Add (Id Process) (Id Part) String
-    | FolderCreated (Id Process) (Id Part) GDrive.FileMeta
+    = Add (Id Process) Process (Id Part) String
+    | FolderCreated (Id Process) Process (Id Part) GDrive.FileMeta
     | SetStaffs (List (Id User))
     | SetReviewers (List (Id User))
     | SetBelongsTo (List (Id Part))
     | SetUpstreams (List (Id Work))
     | SetUpstreamProcesses (List (Id Process))
     | Delete
+    | OtherWork (Id Work) Update
+    | AndThen Update Update
     | None
 
 
@@ -408,7 +447,7 @@ update auth projectId workId worksLens upd =
                                 [ "projects", unId projectId, "works", unId id ]
     in
     case upd of
-        Add processId partId name ->
+        Add processId process partId name ->
             Update.command <|
                 \_ ->
                     GDrive.createFolder auth.token
@@ -416,106 +455,141 @@ update auth projectId workId worksLens upd =
                         [ unId processId ]
                         |> Cmd.map
                             (Result.map
-                                (FolderCreated processId partId)
+                                (FolderCreated processId process partId)
                                 >> Result.withDefault None
                             )
 
-        FolderCreated processId partId folder ->
-            Update.set
-                (o worksLens <| Lens.doc <| Id.fromString folder.id)
-                workDesc
-            <|
-                init (Id.fromString folder.id)
-                    folder.name
-                    processId
-                    partId
-
-        SetStaffs users ->
-            Update.modify lens workDesc <|
-                \work ->
-                    let
-                        staffs =
-                            userRefs users
-
-                        addition =
-                            diff staffs work.staffs
-
-                        deletion =
-                            diff work.staffs staffs
-
-                        working =
-                            if
-                                List.member (getStatus work)
-                                    [ NotAssigned, Working ]
-                            then
-                                diff work.working deletion ++ addition
-
-                            else
-                                work.working
-                    in
-                    { work | staffs = staffs, working = working }
-
-        SetReviewers users ->
-            Update.modify lens workDesc <|
-                \work ->
-                    let
-                        reviewers =
-                            userRefs users
-
-                        addition =
-                            diff reviewers work.reviewers
-
-                        deletion =
-                            diff work.reviewers reviewers
-
-                        reviewing =
-                            if getStatus work == Reviewing then
-                                diff work.reviewing deletion ++ addition
-
-                            else
-                                work.working
-                    in
-                    { work | reviewers = reviewers, reviewing = reviewing }
-
-        SetBelongsTo parts ->
-            Update.modify lens workDesc <|
-                \work -> { work | belongsTo = parts }
-
-        SetUpstreams works ->
-            Update.modify lens workDesc <|
-                \work ->
+        FolderCreated processId process partId folder ->
+            Update.andThen
+                (access <| (o worksLens <| o (partIs partId) Lens.getAll))
+                (\ws ->
                     let
                         upstreams =
-                            workRefs works
-
-                        addition =
-                            diff upstreams work.upstreams
-
-                        deletion =
-                            diff work.upstreams upstreams
+                            List.filter
+                                (\w ->
+                                    List.member (unId w.process)
+                                        process.upstreams
+                                )
+                                ws
 
                         waitingFor =
-                            if
-                                List.member (getStatus work)
-                                    [ NotAssigned, Waiting ]
-                            then
-                                diff work.waitingFor deletion ++ addition
-
-                            else
-                                work.waitingFor
+                            List.filter (getStatus >> (/=) Complete) upstreams
                     in
-                    { work | upstreams = upstreams, waitingFor = waitingFor }
+                    Update.map (\_ -> None) <|
+                        Update.default
+                            (o worksLens <| Lens.doc <| Id.fromString folder.id)
+                            workDesc
+                        <|
+                            { id = folder.id
+                            , name = folder.name
+                            , process = processId
+                            , belongsTo = [ partId ]
+                            , staffs = []
+                            , reviewers = []
+                            , upstreams =
+                                List.map (Id.self >> ref projectId >> WorkRef)
+                                    upstreams
+                            , waitingFor =
+                                List.map (Id.self >> ref projectId >> WorkRef)
+                                    waitingFor
+                            , working = []
+                            , reviewing = []
+                            }
+                )
+
+        SetStaffs users ->
+            Update.map (\_ -> None) <|
+                Update.modify lens workDesc <|
+                    \work ->
+                        let
+                            staffs =
+                                userRefs users
+
+                            addition =
+                                diff staffs work.staffs
+
+                            deletion =
+                                diff work.staffs staffs
+
+                            working =
+                                if
+                                    List.member (getStatus work)
+                                        [ NotAssigned, Working ]
+                                then
+                                    diff work.working deletion ++ addition
+
+                                else
+                                    work.working
+                        in
+                        { work | staffs = staffs, working = working }
+
+        SetReviewers users ->
+            Update.map (\_ -> None) <|
+                Update.modify lens workDesc <|
+                    \work ->
+                        let
+                            reviewers =
+                                userRefs users
+
+                            addition =
+                                diff reviewers work.reviewers
+
+                            deletion =
+                                diff work.reviewers reviewers
+
+                            reviewing =
+                                if getStatus work == Reviewing then
+                                    diff work.reviewing deletion ++ addition
+
+                                else
+                                    work.working
+                        in
+                        { work | reviewers = reviewers, reviewing = reviewing }
+
+        SetBelongsTo parts ->
+            Update.map (\_ -> None) <|
+                Update.modify lens workDesc <|
+                    \work -> { work | belongsTo = parts }
+
+        SetUpstreams works ->
+            Update.map (\_ -> None) <|
+                Update.modify lens workDesc <|
+                    \work ->
+                        let
+                            upstreams =
+                                workRefs works
+
+                            addition =
+                                diff upstreams work.upstreams
+
+                            deletion =
+                                diff work.upstreams upstreams
+
+                            waitingFor =
+                                if
+                                    List.member (getStatus work)
+                                        [ NotAssigned, Waiting ]
+                                then
+                                    diff work.waitingFor deletion ++ addition
+
+                                else
+                                    work.waitingFor
+                        in
+                        { work
+                            | upstreams = upstreams
+                            , waitingFor = waitingFor
+                        }
 
         SetUpstreamProcesses processes ->
             Update.andThen
                 (\data ->
                     Access.andThen
                         (\work ->
-                            Access.access
+                            access
                                 (o worksLens <| o (samePartAs work) Lens.getAll)
                                 data
                         )
-                        (Access.access
+                        (access
                             (o worksLens <| o (Lens.doc workId) Lens.get)
                             data
                         )
@@ -530,6 +604,20 @@ update auth projectId workId worksLens upd =
         Delete ->
             Update.all
                 [ Update.delete lens workDesc
+                , Update.andThen
+                    (access
+                        (o worksLens <| o (downstreamOf workId) Lens.getAll)
+                    )
+                    (flip Update.for <|
+                        \work ->
+                            Update.succeed <|
+                                OtherWork (Id.self work) <|
+                                    SetUpstreams <|
+                                        List.remove workId <|
+                                            List.map
+                                                (\(WorkRef r) -> getId r)
+                                                work.upstreams
+                    )
                 , Update.command <|
                     \_ ->
                         GDrive.files_update auth.token
@@ -537,6 +625,17 @@ update auth projectId workId worksLens upd =
                             { gdriveUpdate | trashed = Just True }
                             |> Cmd.map (\_ -> None)
                 ]
+
+        OtherWork workId_ upd_ ->
+            update auth projectId workId_ worksLens upd_
+                |> Update.map (OtherWork workId_)
+
+        AndThen snd None ->
+            update auth projectId workId worksLens snd
+
+        AndThen snd fst ->
+            update auth projectId workId worksLens fst
+                |> Update.map (AndThen snd)
 
         None ->
             Update.none

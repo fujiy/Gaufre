@@ -147,6 +147,8 @@ function initialize(app) {
               }
             });
 
+            if (querySnapshot.empty) map.item = {};
+
             const updates = builder(map);
             console.log("snapshots", showPathMap(updates));
 

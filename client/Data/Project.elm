@@ -6,7 +6,7 @@ import Data.User as User
 import Data.Work as Work
 import Dict.Extra as Dict
 import Firestore exposing (..)
-import Firestore.Access as Access
+import Firestore.Access as Access exposing (access)
 import Firestore.Desc as Desc
 import Firestore.Lens as Lens exposing (o, where_)
 import Firestore.Path as Path
@@ -14,6 +14,7 @@ import Firestore.Path.Id as Id exposing (Id, unId)
 import Firestore.Path.Id.Map as IdMap
 import Firestore.Update as Update exposing (Updater)
 import GDrive
+import List.Extra as List
 import Maybe.Extra as Maybe
 import Util exposing (flip)
 
@@ -187,10 +188,12 @@ type Update
     = Join
     | Add GDrive.FileMeta
     | AddProcess Process GDrive.FileMeta
-    | AddPart (List (Id Process)) (Id Part) Part
+    | AddPart (List ( Id Process, Process )) (Id Part) Part
+    | InitPartsUpstreams (Id Part) (List ( Id Process, Process ))
     | InviteMember String
     | SetProcessUpstreams Bool (Id Process) (List (Id Process))
     | WorkUpdate (List (Id Work)) Work.Update
+    | AndThen Update Update
     | None
 
 
@@ -206,23 +209,26 @@ update auth projectId upd =
     in
     case upd of
         Join ->
-            Update.modify (myClient auth) clientDesc <|
-                \client ->
-                    { client
-                        | projects =
-                            Array.push (ref projectId) client.projects
-                    }
-
-        Add folder ->
-            Update.all
-                [ Update.modify (myClient auth) clientDesc <|
+            Update.map (\_ -> None) <|
+                Update.modify (myClient auth) clientDesc <|
                     \client ->
                         { client
                             | projects =
                                 Array.push (ref projectId) client.projects
                         }
-                , Update.set lens projectDesc <|
-                    init folder (Data.myRef auth)
+
+        Add folder ->
+            Update.all
+                [ Update.map (\_ -> None) <|
+                    Update.modify (myClient auth) clientDesc <|
+                        \client ->
+                            { client
+                                | projects =
+                                    Array.push (ref projectId) client.projects
+                            }
+                , Update.map (\_ -> None) <|
+                    Update.set lens projectDesc <|
+                        init folder (Data.myRef auth)
                 , Update.batch <|
                     flip List.map Work.defaultProcesses <|
                         \process _ ->
@@ -238,14 +244,15 @@ update auth projectId upd =
                 ]
 
         AddProcess process folder ->
-            Update.modify lens projectDesc <|
-                \project ->
-                    { project
-                        | processes =
-                            IdMap.insert (Id.fromString folder.id)
-                                process
-                                project.processes
-                    }
+            Update.map (\_ -> None) <|
+                Update.modify lens projectDesc <|
+                    \project ->
+                        { project
+                            | processes =
+                                IdMap.insert (Id.fromString folder.id)
+                                    process
+                                    project.processes
+                        }
 
         InviteMember name ->
             let
@@ -263,13 +270,14 @@ update auth projectId upd =
                     case us of
                         [ user ] ->
                             Update.all
-                                [ Update.modify lens projectDesc <|
-                                    \p ->
-                                        { p
-                                            | members =
-                                                User.ref (Id.self user)
-                                                    :: p.members
-                                        }
+                                [ Update.map (\_ -> None) <|
+                                    Update.modify lens projectDesc <|
+                                        \p ->
+                                            { p
+                                                | members =
+                                                    User.ref (Id.self user)
+                                                        :: p.members
+                                            }
                                 , Update.command <|
                                     \_ ->
                                         GDrive.permissions_create auth.token
@@ -284,45 +292,42 @@ update auth projectId upd =
                             Update.none
                 )
 
-        AddPart processes newId part ->
+        AddPart processes partId part ->
             Update.all
-                [ Update.modify lens projectDesc <|
-                    \p -> { p | parts = IdMap.insert newId part p.parts }
-                , List.map
-                    (\processId _ ->
-                        GDrive.createFolder auth.token
-                            part.name
-                            [ unId processId ]
-                            |> Cmd.map
-                                (Result.map
-                                    (Work.FolderCreated processId newId
-                                        >> WorkUpdate [ Id.null ]
-                                    )
-                                    >> Result.withDefault None
-                                )
-                    )
-                    processes
-                    |> Update.batch
+                [ Update.map (\_ -> None) <|
+                    Update.modify lens projectDesc <|
+                        \p -> { p | parts = IdMap.insert partId part p.parts }
+                , List.sortBy (Tuple.second >> .order) processes
+                    |> List.foldr
+                        (\( processId, process ) wupd ->
+                            Work.AndThen wupd <|
+                                Work.Add processId process partId part.name
+                        )
+                        Work.None
+                    |> WorkUpdate [ Id.null ]
+                    |> AndThen (InitPartsUpstreams partId processes)
+                    |> Update.succeed
                 ]
 
         SetProcessUpstreams updateExisting processId upstreams ->
             Update.all
-                [ Update.modify lens projectDesc <|
-                    \project ->
-                        { project
-                            | processes =
-                                IdMap.modify processId
-                                    (\process ->
-                                        { process
-                                            | upstreams =
-                                                List.map unId upstreams
-                                        }
-                                    )
-                                    project.processes
-                        }
+                [ Update.map (\_ -> None) <|
+                    Update.modify lens projectDesc <|
+                        \project ->
+                            { project
+                                | processes =
+                                    IdMap.modify processId
+                                        (\process ->
+                                            { process
+                                                | upstreams =
+                                                    List.map unId upstreams
+                                            }
+                                        )
+                                        project.processes
+                            }
                 , if updateExisting then
                     Update.andThen
-                        (Access.access
+                        (access
                             (o lens <|
                                 o works <|
                                     o (Work.processIs processId) Lens.getAll
@@ -340,6 +345,33 @@ update auth projectId upd =
                     Update.none
                 ]
 
+        InitPartsUpstreams partId processes ->
+            Update.andThen
+                (access
+                    (o lens <| o works <| o (Work.partIs partId) Lens.getAll)
+                )
+                (List.foldr
+                    (\w wupd ->
+                        let
+                            upstreams =
+                                List.find
+                                    (Tuple.first >> (==) w.process)
+                                    processes
+                                    |> Maybe.unwrap []
+                                        (Tuple.second
+                                            >> .upstreams
+                                            >> List.map Id.selfId
+                                        )
+                        in
+                        Work.AndThen wupd <|
+                            Work.OtherWork (Id.self w) <|
+                                Work.SetUpstreamProcesses upstreams
+                    )
+                    Work.None
+                    >> WorkUpdate [ Id.null ]
+                    >> Update.succeed
+                )
+
         WorkUpdate ids wupd ->
             List.map
                 (\workId ->
@@ -348,6 +380,16 @@ update auth projectId upd =
                 )
                 ids
                 |> Update.all
+
+        AndThen snd None ->
+            update auth projectId snd
+
+        AndThen snd (WorkUpdate _ Work.None) ->
+            update auth projectId snd
+
+        AndThen snd fst ->
+            update auth projectId fst
+                |> Update.map (AndThen snd)
 
         None ->
             Update.none

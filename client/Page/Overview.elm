@@ -17,7 +17,7 @@ import Firestore.Path.Id.Set as IdSet
 import Firestore.Remote exposing (Remote(..))
 import Firestore.Update as Update exposing (Updater)
 import GDrive
-import Html exposing (Html, button, div, input, label, node, table, td, text, th, thead, tr)
+import Html exposing (Html, button, div, input, label, node, span, table, td, text, th, thead, tr)
 import Html.Attributes as Attr exposing (checked, class, colspan, placeholder, rowspan, style, type_, value)
 import Html.Events exposing (onCheck, onClick, onDoubleClick, onInput)
 import Html.Keyed as Keyed
@@ -429,6 +429,9 @@ actions :
     -> Html Msg
 actions model project role members works =
     let
+        allWorks =
+            IdMap.fromListSelf works
+
         selection =
             List.filter (Work.isSelected model.selection) works
 
@@ -443,7 +446,7 @@ actions model project role members works =
             gatherList (.reviewers >> List.map (Firestore.getId >> unId))
                 selection
 
-        status =
+        statuses =
             List.map Work.getStatus selection
                 |> List.sortBy Work.statusNumber
                 |> List.uniqueBy Work.statusNumber
@@ -498,7 +501,21 @@ actions model project role members works =
                             model.selection
                     ]
                 , div [ class "description" ] <|
-                    List.map Work.statusLabel status
+                    List.map Work.statusLabel statuses
+                , if List.member Work.Waiting statuses then
+                    Html.map (\_ -> None) <|
+                        div [ class "description" ] <|
+                            span [] [ text "未完了の前工程：" ]
+                                :: List.map
+                                    (Work.waitingStatuses
+                                        project.processes
+                                        project.parts
+                                        allWorks
+                                    )
+                                    selection
+
+                  else
+                    text ""
                 ]
             , div [ class "content" ]
                 [ div [ class "header" ] [ text "メンバー" ]
@@ -559,7 +576,8 @@ modalView model project workMap works =
                                 |> List.filterMap
                                     (\( id, ( _, add ) ) ->
                                         if add then
-                                            Just id
+                                            IdMap.get id project.processes
+                                                |> Maybe.map (Tuple.pair id)
 
                                         else
                                             Nothing
@@ -569,7 +587,13 @@ modalView model project workMap works =
                             newPart
 
                 AddWorkModal processId partId name ->
-                    WorkUpdate [ Id.null ] <| Work.Add processId partId name
+                    case IdMap.get processId project.processes of
+                        Just process ->
+                            WorkUpdate [ Id.null ] <|
+                                Work.Add processId process partId name
+
+                        Nothing ->
+                            None
 
                 DeleteWorkModal id ->
                     WorkUpdate [ id ] Work.Delete

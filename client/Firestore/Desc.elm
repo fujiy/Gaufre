@@ -32,6 +32,11 @@ type alias Applier_ p l r =
     p -> r -> Result Decode.Error l
 
 
+type Update
+    = Got Value
+    | Clear
+
+
 type alias Desc a =
     { encoder : Encoder a
     , decoder : Decoder a
@@ -42,21 +47,21 @@ type DocumentDesc s r
     = DocumentDesc
         { encoder : Encoder (Remote r)
         , decoder : Decoder (Remote r)
-        , applier : Applier (PathMap.Doc Value) s
+        , applier : Applier (PathMap.Doc Update) s
         , empty : s
         }
 
 
 type FirestoreDesc r
     = FirestoreDesc
-        { applier : Applier (PathMap.Map Value) r
+        { applier : Applier (PathMap.Map Update) r
         , empty : r
         }
 
 
 type CollectionDesc l r
     = CollectionDesc
-        { applier : Applier_ (IdMap.Map r (PathMap.Col Value)) l r
+        { applier : Applier_ (IdMap.Map r (PathMap.Col Update)) l r
         , empty : l
         }
 
@@ -177,6 +182,7 @@ collection name getter (DocumentDesc d) (CollectionDesc c) =
                 Collection
                     { name = Id name
                     , empty = d.empty
+                    , loading = True
                     , docs = IdMap.empty
                     , q = Dict.empty
                     }
@@ -188,65 +194,97 @@ collection name getter (DocumentDesc d) (CollectionDesc c) =
 
         applier cpvs (Collection col) =
             let
-                -- (Collection col) =
-                --     getter r
                 cpv =
                     IdMap.get (Id name) cpvs
                         |> Maybe.withDefault PathMap.emptyCol
             in
-            Result.map2
-                (\docs q ->
-                    Collection { col | docs = docs, q = q }
-                )
-                (List.foldr
-                    (\( did, dpv ) rd ->
-                        let
-                            (Document sub doc) =
-                                IdMap.get did col.docs
-                                    |> Maybe.withDefault
-                                        (Document d.empty Loading)
+            if PathMap.isEmptyCol cpv then
+                Ok <| Collection col
 
-                            sub_ =
-                                d.applier dpv sub
+            else
+                case PathMap.getColRoot cpv of
+                    Just Clear ->
+                        Ok <|
+                            Collection
+                                { name = Id name
+                                , empty = d.empty
+                                , loading = True
+                                , docs = IdMap.empty
+                                , q = Dict.empty
+                                }
 
-                            doc_ =
-                                PathMap.getDocRoot dpv
-                                    |> Maybe.unwrap (Ok doc)
-                                        (Decode.decodeValue d.decoder)
-                        in
+                    _ ->
                         Result.map2
-                            (IdMap.insert did)
-                            (Result.map2 Document sub_ doc_)
-                            rd
-                    )
-                    (Ok col.docs)
-                    (PathMap.subDocs cpv |> IdMap.toList)
-                )
-                (List.foldr
-                    (\qpv rq ->
-                        let
-                            key =
-                                queryKey qpv.field qpv.op qpv.value
+                            (\docs q ->
+                                Collection
+                                    { col
+                                        | docs = docs
+                                        , q = q
+                                        , loading = False
+                                    }
+                            )
+                            (List.foldr
+                                (\( did, dpv ) rd ->
+                                    let
+                                        (Document sub doc) =
+                                            IdMap.get did col.docs
+                                                |> Maybe.withDefault
+                                                    (Document d.empty Loading)
 
-                            qcol =
-                                Dict.get key col.q
-                                    |> Maybe.withDefault
-                                        (Collection
-                                            { name = Id name
-                                            , empty = d.empty
-                                            , docs = IdMap.empty
-                                            , q = Dict.empty
-                                            }
-                                        )
+                                        sub_ =
+                                            d.applier dpv sub
 
-                            qcol_ =
-                                applier (IdMap.singleton (Id name) qpv.col) qcol
-                        in
-                        Result.map2 (Dict.insert key) qcol_ rq
-                    )
-                    (Ok col.q)
-                    (PathMap.subQueries cpv)
-                )
+                                        doc_ =
+                                            case PathMap.getDocRoot dpv of
+                                                Nothing ->
+                                                    Ok doc
+
+                                                Just Clear ->
+                                                    Ok Loading
+
+                                                Just (Got v) ->
+                                                    Decode.decodeValue
+                                                        d.decoder
+                                                        v
+                                    in
+                                    Result.map2
+                                        (IdMap.insert did)
+                                        (Result.map2 Document sub_ doc_)
+                                        rd
+                                )
+                                (Ok col.docs)
+                                (PathMap.subDocs cpv |> IdMap.toList)
+                            )
+                            (List.foldr
+                                (\qpv rq ->
+                                    let
+                                        key =
+                                            queryKey qpv.field qpv.op qpv.value
+
+                                        qcol =
+                                            Dict.get key col.q
+                                                |> Maybe.withDefault
+                                                    (Collection
+                                                        { name = Id name
+                                                        , empty = d.empty
+                                                        , loading = True
+                                                        , docs = IdMap.empty
+                                                        , q = Dict.empty
+                                                        }
+                                                    )
+
+                                        qcol_ =
+                                            applier
+                                                (IdMap.singleton (Id name)
+                                                    qpv.col
+                                                )
+                                                qcol
+                                    in
+                                    Result.map2 (Dict.insert key) qcol_ rq
+                                )
+                                (Ok col.q)
+                                (PathMap.subQueries cpv)
+                            )
     in
     CollectionDesc { applier = applier_, empty = empty }
 
@@ -349,6 +387,20 @@ request =
 idMap : Desc a -> Desc (IdMap.Map x a)
 idMap desc =
     map (Iso IdMap.fromDict IdMap.toDict) (dict desc)
+
+
+update : Desc Update
+update =
+    Desc
+        (\u ->
+            case u of
+                Clear ->
+                    Encode.null
+
+                Got v ->
+                    v
+        )
+        (Decode.map Got Decode.value)
 
 
 

@@ -39,17 +39,46 @@ all =
 
 none : Updater a msg
 none =
-    Updater noUpdates
+    Updater noUpdates_
 
 
-noUpdates : a -> Updates a msg
-noUpdates a =
+noUpdates_ : a -> Updates a msg
+noUpdates_ a =
     Updates a PathMap.empty Cmd.none none
+
+
+noUpdates : a -> msg -> Updates a msg
+noUpdates a msg =
+    Updates a PathMap.empty (Task.perform identity <| Task.succeed msg) none
 
 
 succeed : msg -> Updater a msg
 succeed msg =
     command <| \_ -> Task.perform identity <| Task.succeed msg
+
+
+withCommand : msg -> Updater a msg -> Updater a msg
+withCommand msg (Updater f) =
+    Updater <|
+        \a ->
+            let
+                upd =
+                    f a
+            in
+            if
+                PathMap.filterMap isUpdateRequest upd.requests
+                    |> PathMap.isEmpty
+            then
+                { upd | afterwards = withCommand msg upd.afterwards }
+
+            else
+                { upd
+                    | command =
+                        Cmd.batch
+                            [ upd.command
+                            , Task.perform identity <| Task.succeed msg
+                            ]
+                }
 
 
 command : (a -> Cmd msg) -> Updater a msg
@@ -135,7 +164,7 @@ alter :
     Lens Root a Doc (Document s r)
     -> DocumentDesc s r
     -> (Maybe r -> Alter r)
-    -> Updater a msg
+    -> Updater a (Maybe r)
 alter (Lens l) (DocumentDesc d) f =
     let
         updater _ =
@@ -152,7 +181,7 @@ alter (Lens l) (DocumentDesc d) f =
 
                         update mr =
                             let
-                                ( newR, mu ) =
+                                ( newR, mu, new ) =
                                     case f mr of
                                         Update r ->
                                             ( Committing r
@@ -160,22 +189,30 @@ alter (Lens l) (DocumentDesc d) f =
                                                 Set <|
                                                     d.encoder <|
                                                         Committing r
+                                            , Just r
                                             )
 
                                         NoChange ->
-                                            ( Remote.fromMaybe mr, Nothing )
+                                            ( Remote.fromMaybe mr
+                                            , Nothing
+                                            , mr
+                                            )
 
                                         Delete ->
-                                            ( Failure, Just Internal.Delete )
+                                            ( Failure
+                                            , Just Internal.Delete
+                                            , Nothing
+                                            )
                             in
                             case mu of
                                 Just u ->
                                     l.update u (Document s newR)
                                         |> fromDoc
+                                        |> withCommand new
                                         |> flip runUpdater a
 
                                 Nothing ->
-                                    noUpdates a
+                                    noUpdates a new
                     in
                     case
                         Remote.andThen (\(Document _ rr) -> rr) rd
@@ -204,7 +241,7 @@ modify :
     Lens Root a Doc (Document s r)
     -> DocumentDesc s r
     -> (r -> r)
-    -> Updater a msg
+    -> Updater a (Maybe r)
 modify l d f =
     alter l d <|
         Maybe.unwrap NoChange
@@ -225,9 +262,10 @@ default :
     Lens Root a Doc (Document s r)
     -> DocumentDesc s r
     -> r
-    -> Updater a msg
+    -> Updater a r
 default l d r =
-    alter l d <| Maybe.unwrap (Update r) (always NoChange)
+    alter l d (Maybe.unwrap (Update r) (always NoChange))
+        |> map (Maybe.withDefault r)
 
 
 both : Updater a msg -> Updater a msg -> Updater a msg
@@ -260,7 +298,7 @@ andThen acc upd =
                     in
                     case ra of
                         Failure ->
-                            noUpdates r
+                            noUpdates_ r
 
                         Loading ->
                             { value = r
@@ -295,7 +333,7 @@ list updater bs =
                     , afterwards = both upds.afterwards <| list updater bs
                     }
                 )
-                (noUpdates [])
+                (noUpdates_ [])
                 (List.zip xs bs)
 
 
@@ -316,5 +354,5 @@ array updater bs =
                     , afterwards = both upds.afterwards <| array updater bs
                     }
                 )
-                (noUpdates Array.empty)
+                (noUpdates_ Array.empty)
                 (Array.zip xs bs)

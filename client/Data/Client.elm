@@ -42,10 +42,12 @@ currentProject auth i =
 -- Updaters
 
 
-init : Auth -> User -> Updater Data msg
+init : Auth -> User -> Updater Data ()
 init auth user =
     Update.all
-        [ Update.default (User.me auth) userDesc user
-        , Update.default (my auth) clientDesc <|
-            { projects = Array.empty }
+        [ Update.map (\_ -> ()) <|
+            Update.default (User.me auth) userDesc user
+        , Update.map (\_ -> ()) <|
+            Update.default (my auth) clientDesc <|
+                { projects = Array.empty }
         ]
