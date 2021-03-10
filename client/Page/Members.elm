@@ -7,7 +7,7 @@ import Firestore.Access as Access exposing (Accessor)
 import Firestore.Lens as Lens exposing (o)
 import Firestore.Path.Id as Id exposing (Id)
 import Firestore.Update as Update exposing (Updater)
-import Html exposing (Html, button, div, img, input, node, table, tbody, td, text, th, thead, tr)
+import Html exposing (Html, button, div, h1, img, input, node, table, tbody, td, text, th, thead, tr)
 import Html.Attributes exposing (class, colspan, placeholder, src, type_)
 import Html.Events as Events exposing (onClick, onInput)
 import Json.Decode as Decode
@@ -57,9 +57,22 @@ view auth model data project =
         (Access.access (o (Project.members project) Lens.gets) data)
     <|
         \members ->
-            div []
-                [ table [ class "ui sinigle line table" ]
-                    [ thead [] [ tableHeader <| Project.myRole project auth ]
+            let
+                role =
+                    Project.myRole project auth
+            in
+            div [ class "ui padded basic segment" ]
+                [ h1 []
+                    [ text "メンバー"
+                    , when (Project.authority role |> .manageMembers) <|
+                        button
+                            [ class "ui right floated primary button"
+                            , onClick <| ModalState <| SearchUserModal ""
+                            ]
+                            [ icon "user plus", text "メンバーを招待する" ]
+                    ]
+                , table [ class "ui single line table" ]
+                    [ thead [] []
                     , tbody [] <| List.map (tableRow project) members
                     ]
                 , modalView model project
@@ -69,8 +82,8 @@ view auth model data project =
 tableHeader : Project.Role -> Html Msg
 tableHeader role =
     tr []
-        [ th [ colspan 3 ]
-            [ text "メンバー"
+        [ th [ colspan 4 ]
+            [ text "メンバー 一覧"
             , when (Project.authority role).manageMembers <|
                 button
                     [ class "ui right floated primary button"
@@ -86,8 +99,10 @@ tableRow project user =
     tr []
         [ td [ class "collapsing" ]
             [ img [ class "ui avatar image", src user.image ] [] ]
-        , td []
+        , td [ class "collapsing" ]
             [ div [ class "header" ] [ text user.name ] ]
+        , td []
+            [ div [ class "header" ] [ text user.profile ] ]
         , td [ class "collapsing" ]
             [ case Project.userRole project <| Id.self user of
                 Project.Owner ->
@@ -114,7 +129,7 @@ modalView model project =
             SearchUserModal email ->
                 [ div [ class "header" ] [ text "メンバーを招待する" ]
                 , div [ class "content" ]
-                    [ div [ class "ui right labeled input select-all" ]
+                    [ div [ class "ui right labeled input" ]
                         [ input
                             [ type_ "text"
                             , placeholder "メールアドレス"

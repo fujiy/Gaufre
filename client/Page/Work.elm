@@ -620,7 +620,7 @@ actionModal model =
                 [ div [ class "header" ] [ text <| title ++ "の名前を変更" ]
                 , div
                     [ class "content" ]
-                    [ div [ class "ui fluid input select-all" ]
+                    [ div [ class "ui fluid input" ]
                         [ input
                             [ type_ "text"
                             , placeholder <| title ++ "名"
@@ -676,7 +676,7 @@ actionModal model =
                 [ div [ class "header" ] [ text "空のフォルダを作成" ]
                 , div
                     [ class "content" ]
-                    [ div [ class "ui fluid input select-all" ]
+                    [ div [ class "ui fluid input" ]
                         [ input
                             [ type_ "text"
                             , placeholder "フォルダ名"

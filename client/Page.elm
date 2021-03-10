@@ -13,6 +13,7 @@ import Firestore.Update as Update exposing (Updater)
 import Html exposing (Html, a, div, map, text)
 import Html.Attributes as Html exposing (class, href, style)
 import Maybe.Extra as Maybe
+import Page.Account as Account
 import Page.Dashboard as Dashboard
 import Page.Members as Members
 import Page.Overview as Overview
@@ -37,6 +38,7 @@ type Page
     | Overview Overview.Model
     | Work Work.Model
     | Members Members.Model
+    | Account Account.Model
 
 
 type Msg
@@ -45,6 +47,7 @@ type Msg
     | OverviewMsg (Id Project) Overview.Msg
     | WorkMsg (Id Project) Work.Msg
     | MembersMsg (Id Project) Members.Msg
+    | AccountMsg Account.Msg
     | SignOut
 
 
@@ -85,6 +88,7 @@ urlChanged model url =
                         , Url.map (Overview Overview.init) Url.top
                         , Url.map (Members Members.init) <| Url.s "members"
                         ]
+        , Url.map (Model (Account Account.init) 0) <| Url.s "account"
         ]
         |> flip Url.parse url
         |> Maybe.withDefault model
@@ -141,6 +145,15 @@ update auth message model =
             in
             ( { model | page = Members m_ }
             , Update.map (MembersMsg projectId) upd
+            )
+
+        ( AccountMsg msg, Account m ) ->
+            let
+                ( m_, upd ) =
+                    Account.update auth msg m
+            in
+            ( { model | page = Account m_ }
+            , Update.map AccountMsg upd
             )
 
         _ ->
@@ -206,6 +219,18 @@ view auth model data =
                                         |> Access.map
                                             (map <| MembersMsg <| Id.self p)
                                 )
+
+                    Account m ->
+                        Account.view auth m data
+                            |> Access.map
+                                (map <|
+                                    \msg ->
+                                        if msg == Account.SignOut then
+                                            SignOut
+
+                                        else
+                                            AccountMsg msg
+                                )
             ]
 
 
@@ -217,6 +242,7 @@ sidemenu auth model data mproject =
             , dashboard = False
             , browse = False
             , members = False
+            , account = False
             }
 
         pg =
@@ -235,6 +261,9 @@ sidemenu auth model data mproject =
 
                 Members _ ->
                     { pg_ | members = True }
+
+                Account _ ->
+                    { pg_ | account = True }
 
         link p =
             href <| Url.Builder.absolute [ String.fromInt model.project, p ] []
@@ -271,7 +300,8 @@ sidemenu auth model data mproject =
                     [ icon "users", text "メンバー" ]
                 , a
                     [ class "item"
-                    , link "me"
+                    , href "/account"
+                    , classIf pg.account "active"
                     , style "position" "fixed"
                     , style "bottom" "0"
                     , style "width" "210px"

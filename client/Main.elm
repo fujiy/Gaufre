@@ -24,7 +24,7 @@ port signIn : () -> Cmd msg
 port signOut : () -> Cmd msg
 
 
-port authorized : ({ auth : { uid : String, token : String }, user : User } -> msg) -> Sub msg
+port authorized : ({ auth : { uid : String, token : String }, user : { id : String, name : String, image : String, email : String } } -> msg) -> Sub msg
 
 
 port firestoreSubPort : Firestore.SubPort msg
@@ -134,34 +134,33 @@ update msg model =
                     , cmd
                     )
 
+                Page Page.SignOut ->
+                    ( NotSignedIn
+                        { navKey = r.auth.navKey, url = r.url }
+                    , Cmd.batch
+                        [ signOut (), Nav.load "/" ]
+                    )
+
                 Page m ->
-                    case m of
-                        Page.SignOut ->
-                            ( NotSignedIn
-                                { navKey = r.auth.navKey, url = r.url }
-                            , signOut ()
-                            )
+                    let
+                        ( page, upd ) =
+                            Page.update r.auth m r.page
 
-                        _ ->
-                            let
-                                ( page, upd ) =
-                                    Page.update r.auth m r.page
-
-                                ( fs, mview, cmd ) =
-                                    Firestore.update
-                                        firestoreCmdPort
-                                        (Update.map Page upd)
-                                        (pageView r.auth page)
-                                        r.firestore
-                            in
-                            ( SignedIn
-                                { r
-                                    | page = page
-                                    , firestore = fs
-                                    , view = Maybe.withDefault r.view mview
-                                }
-                            , cmd
-                            )
+                        ( fs, mview, cmd ) =
+                            Firestore.update
+                                firestoreCmdPort
+                                (Update.map Page upd)
+                                (pageView r.auth page)
+                                r.firestore
+                    in
+                    ( SignedIn
+                        { r
+                            | page = page
+                            , firestore = fs
+                            , view = Maybe.withDefault r.view mview
+                        }
+                    , cmd
+                    )
 
                 LinkClicked urlRequest ->
                     case urlRequest of
@@ -260,8 +259,16 @@ subscriptions model =
             authorized <|
                 \{ auth, user } ->
                     Authorized
-                        { uid = auth.uid, token = auth.token, navKey = m.navKey }
-                        user
+                        { uid = auth.uid
+                        , token = auth.token
+                        , navKey = m.navKey
+                        }
+                        { id = user.id
+                        , name = user.name
+                        , image = user.image
+                        , email = user.email
+                        , profile = ""
+                        }
 
         SignedIn { firestore } ->
             Firestore.watch firestoreSubPort firestore

@@ -35,6 +35,7 @@ type alias User =
     , name : String
     , image : String
     , email : String
+    , profile : String
     }
 
 
@@ -110,6 +111,7 @@ userDesc =
         field "name" .name Desc.string
             >> field "image" .image Desc.string
             >> field "email" .email Desc.string
+            >> optional "profile" .profile "" Desc.string
 
 
 clientDesc : DocumentDesc () Client

@@ -259,7 +259,7 @@ searchModal auth data model =
                                 [ class "ui fluid search"
                                 , classIf loading "loading"
                                 ]
-                                [ div [ class "ui icon fluid input select-all" ]
+                                [ div [ class "ui icon fluid input" ]
                                     [ input
                                         [ class "propt"
                                         , type_ "text"

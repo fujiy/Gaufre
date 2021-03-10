@@ -625,7 +625,7 @@ modalView model project workMap allWorks =
                 , div [ class "content" ]
                     [ Html.p []
                         [ text "名前："
-                        , div [ class "ui input select-all" ]
+                        , div [ class "ui input" ]
                             [ input
                                 [ type_ "text"
                                 , placeholder "名前を入力"
@@ -672,7 +672,7 @@ modalView model project workMap allWorks =
                 , div [ class "content" ]
                     [ Html.p []
                         [ text "名前："
-                        , div [ class "ui input select-all" ]
+                        , div [ class "ui input" ]
                             [ input
                                 [ type_ "text"
                                 , placeholder "名前を入力"

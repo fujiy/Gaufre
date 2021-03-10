@@ -289,7 +289,7 @@ processList :
     -> Html (List (Id Process))
 processList processs ids =
     node "ui-dropdown"
-        [ class "ui small multiple search selection dropdown select-all"
+        [ class "ui small multiple search selection dropdown select-text"
         , attribute "multiple" ""
         , attribute "value" <| String.join "," <| List.map unId ids
         , onChangeValues |> Attr.map (List.map Id.fromString)
@@ -332,7 +332,7 @@ partList parts work =
             work.belongsTo |> List.map unId
     in
     node "ui-dropdown"
-        [ class "ui small multiple search selection dropdown select-all"
+        [ class "ui small multiple search selection dropdown select-text"
         , attribute "multiple" ""
         , attribute "value" <| String.join "," values
         , onChangeValues

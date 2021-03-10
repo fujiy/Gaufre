@@ -9,7 +9,7 @@ import Firestore.Access as Access exposing (Accessor)
 import Firestore.Lens as Lens exposing (o)
 import Firestore.Path.Id as Id exposing (Id)
 import Firestore.Path.Id.Map as IdMap
-import Firestore.Remote as Remote exposing (Remote)
+import Firestore.Remote as Remote
 import Firestore.Update as Update exposing (Updater)
 import Html exposing (Html, div, text)
 import Html.Attributes as Html exposing (class, href, style)
@@ -77,6 +77,7 @@ taskList auth data project members task =
             in
             div
                 [ class "ui card"
+                , class <| Client.taskColor task
                 , style "flex" "0 0 300px"
                 ]
                 [ div [ class "content" ]

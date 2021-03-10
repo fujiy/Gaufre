@@ -86,6 +86,28 @@ taskIconClass task =
             "check"
 
 
+taskColor : TaskState -> String
+taskColor task =
+    case task of
+        Working ->
+            "blue"
+
+        Reviewing ->
+            "orange"
+
+        WaitingUpstream ->
+            "grey"
+
+        WaitingSubmit ->
+            "purple"
+
+        WaitingReview ->
+            "olive"
+
+        Complete ->
+            "green"
+
+
 
 -- Lenses
 

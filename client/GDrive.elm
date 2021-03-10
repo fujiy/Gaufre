@@ -379,6 +379,11 @@ files_delete token id =
     request token "DELETE" ("file/" ++ id) [] (Decode.succeed ())
 
 
+files_create : Token -> String -> List Id -> File -> Cmd (Result Error FileMeta)
+files_create token name parents file =
+    Task.attempt identity <| files_create_Task token name parents file
+
+
 files_create_Task : Token -> String -> List Id -> File -> Task Error FileMeta
 files_create_Task token name parents file =
     Http.task
