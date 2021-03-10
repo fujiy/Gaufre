@@ -19,6 +19,74 @@ type alias Document =
 
 
 
+-- Utilities
+
+
+type TaskState
+    = Working
+    | Reviewing
+    | WaitingUpstream
+    | WaitingSubmit
+    | WaitingReview
+    | Complete
+
+
+defaultList : List TaskState
+defaultList =
+    [ WaitingUpstream
+    , Working
+    , WaitingSubmit
+    , Reviewing
+    , WaitingReview
+    , Complete
+    ]
+
+
+taskTitle : TaskState -> String
+taskTitle task =
+    case task of
+        Working ->
+            "作業中"
+
+        Reviewing ->
+            "チェック中"
+
+        WaitingUpstream ->
+            "前工程待ち"
+
+        WaitingSubmit ->
+            "提出待ち"
+
+        WaitingReview ->
+            "チェック待ち"
+
+        Complete ->
+            "完了"
+
+
+taskIconClass : TaskState -> String
+taskIconClass task =
+    case task of
+        Working ->
+            "paint brush"
+
+        Reviewing ->
+            "eye"
+
+        WaitingUpstream ->
+            "hourglass outline"
+
+        WaitingSubmit ->
+            "hourglass start"
+
+        WaitingReview ->
+            "hourglass half"
+
+        Complete ->
+            "check"
+
+
+
 -- Lenses
 
 

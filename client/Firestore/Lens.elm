@@ -3,7 +3,7 @@ module Firestore.Lens exposing (..)
 import Array exposing (Array, slice)
 import Dict
 import Firestore.Access as Access
-import Firestore.Desc exposing (Desc)
+import Firestore.Desc as Desc exposing (Desc)
 import Firestore.Internal exposing (..)
 import Firestore.Path as Path exposing (Path)
 import Firestore.Path.Id as Id exposing (Id(..))
@@ -343,11 +343,10 @@ where_ field qop desc a =
                                         }
                                     )
                      in
-                     if col.loading then
-                        Loading
-
-                     else
-                        UpToDate <| Collection qcol
+                     -- if col.loading then
+                     --    Loading
+                     -- else
+                     UpToDate <| Collection qcol
                     )
         , update =
             \u qc ->
@@ -366,6 +365,16 @@ where_ field qop desc a =
                         , afterwards = noUpdater
                         }
         }
+
+
+whereEmpty : String -> Lens Col (Collection s r) Col (Collection s r)
+whereEmpty field =
+    where_ field EQ (Desc.list Desc.string) []
+
+
+whereNotEmpty : String -> Lens Col (Collection s r) Col (Collection s r)
+whereNotEmpty field =
+    where_ field NE (Desc.list Desc.string) []
 
 
 getAllRemote : Lens Col (Collection s r) Item (List (Remote r))

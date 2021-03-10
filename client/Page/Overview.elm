@@ -501,11 +501,7 @@ actions model project role members works =
                         text ""
             , div [ class "header" ]
                 [ text <|
-                    Work.selectionTitle
-                        project.processes
-                        project.parts
-                        allWorks
-                        model.selection
+                    Work.selectionTitle project allWorks model.selection
                 ]
             , div [ class "description" ] <|
                 List.map Work.statusLabel statuses
@@ -514,11 +510,7 @@ actions model project role members works =
                     div [ class "description" ] <|
                         span [] [ text "未完了の前工程：" ]
                             :: List.map
-                                (Work.waitingStatuses
-                                    project.processes
-                                    project.parts
-                                    allWorks
-                                )
+                                (Work.waitingStatuses project allWorks)
                                 selection
 
               else
@@ -584,8 +576,10 @@ modalView model project workMap allWorks =
                                 |> List.filterMap
                                     (\( id, ( _, add ) ) ->
                                         if add then
-                                            IdMap.get id project.processes
-                                                |> Maybe.map (Tuple.pair id)
+                                            Just
+                                                ( id
+                                                , Work.getProcess project id
+                                                )
 
                                         else
                                             Nothing
@@ -771,10 +765,7 @@ modalView model project workMap allWorks =
                         List.filterMap (flip IdMap.get allWorks) workIds
 
                     title =
-                        Work.worksTitle project.processes
-                            project.parts
-                            allWorks
-                            workIds
+                        Work.worksTitle project allWorks workIds
                 in
                 [ div [ class "header" ]
                     [ text <| title ++ " の設定" ]
@@ -795,12 +786,30 @@ modalView model project workMap allWorks =
                                         )
                                         project.parts
                             in
-                            [ text "含まれるカット："
-                            , Work.partList choices work
-                                |> Html.map
-                                    (WorkUpdate [ Id.self work ]
-                                        << Work.SetBelongsTo
+                            [ Html.p []
+                                [ text "含まれるカット："
+                                , Work.partList choices work
+                                    |> Html.map
+                                        (WorkUpdate [ Id.self work ]
+                                            << Work.SetBelongsTo
+                                        )
+                                ]
+                            , Html.p []
+                                [ text "前の工程："
+                                , Work.processList project.processes
+                                    (List.filterMap
+                                        (\(WorkRef r) ->
+                                            IdMap.get (Firestore.getId r)
+                                                allWorks
+                                                |> Maybe.map .process
+                                        )
+                                        work.upstreams
                                     )
+                                    |> Html.map
+                                        (WorkUpdate [ Id.self work ]
+                                            << Work.SetUpstreamProcesses
+                                        )
+                                ]
                             ]
 
                     _ ->
@@ -821,10 +830,7 @@ modalView model project workMap allWorks =
             DeleteWorkModal workIds ->
                 let
                     title =
-                        Work.worksTitle project.processes
-                            project.parts
-                            allWorks
-                            workIds
+                        Work.worksTitle project allWorks workIds
                 in
                 [ div [ class "ui icon header" ]
                     [ icon "trash alternate outline"
@@ -845,29 +851,25 @@ modalView model project workMap allWorks =
                 ]
 
             DeletePartModal partId ->
-                case IdMap.get partId project.parts of
-                    Just part ->
-                        [ div [ class "ui icon header" ]
-                            [ icon "trash alternate outline"
-                            , text <| part.name ++ " を削除"
-                            ]
-                        , div [ class "content" ]
-                            [ Html.p [] [ text "本当に削除しますか？" ] ]
-                        , div [ class "actions" ]
-                            [ button
-                                [ class "ui negative button"
-                                , onClick <|
-                                    ProjectUpdate <|
-                                        Project.DeletePart partId
-                                ]
-                                [ text "削除" ]
-                            , button [ class "ui deny button" ]
-                                [ text "キャンセル" ]
-                            ]
+                let
+                    part =
+                        Work.getPart project partId
+                in
+                [ div [ class "ui icon header" ]
+                    [ icon "trash alternate outline"
+                    , text <| part.name ++ " を削除"
+                    ]
+                , div [ class "content" ]
+                    [ Html.p [] [ text "本当に削除しますか？" ] ]
+                , div [ class "actions" ]
+                    [ button
+                        [ class "ui negative button"
+                        , onClick <| ProjectUpdate <| Project.DeletePart partId
                         ]
-
-                    Nothing ->
-                        []
+                        [ text "削除" ]
+                    , button [ class "ui deny button" ] [ text "キャンセル" ]
+                    ]
+                ]
 
             Hidden ->
                 []

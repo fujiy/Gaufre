@@ -358,7 +358,7 @@ view auth model data project =
                     List.map Firestore.getId work.reviewers
 
                 title =
-                    Work.title project.processes project.parts work
+                    Work.title project work
             in
             div [ class "ui grid" ]
                 [ div [ class "row" ] []

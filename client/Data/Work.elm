@@ -1,11 +1,12 @@
 module Data.Work exposing (..)
 
 import Data exposing (..)
+import Data.User as User
 import Dict
 import Firestore exposing (..)
 import Firestore.Access as Access exposing (access)
 import Firestore.Desc as Desc
-import Firestore.Lens as Lens exposing (o, where_)
+import Firestore.Lens as Lens exposing (QueryOp(..), o, whereEmpty, whereNotEmpty, where_)
 import Firestore.Path as Path
 import Firestore.Path.Id as Id exposing (Id, unId)
 import Firestore.Path.Id.Map as IdMap
@@ -16,7 +17,8 @@ import Html exposing (Html, div, input, node, span, text)
 import Html.Attributes as Attr exposing (attribute, class, type_)
 import Html.Events exposing (onClick)
 import List.Extra as List
-import Util exposing (diff, flip, icon, onChangeValues)
+import Url.Builder as Url
+import Util exposing (diff, flip, icon, mean, onChangeValues)
 
 
 type Status
@@ -39,15 +41,51 @@ type alias Document =
     Firestore.Document () Work
 
 
-title : IdMap.Map Process Process -> IdMap.Map Part Part -> Work -> String
-title processes parts work =
+getWorkProcess : Project -> Work -> Process
+getWorkProcess project work =
+    IdMap.get work.process project.processes
+        |> Maybe.withDefault nullProcess
+
+
+getPart : Project -> Id Part -> Part
+getPart project id =
+    IdMap.get id project.parts |> Maybe.withDefault nullPart
+
+
+getProcess : Project -> Id Process -> Process
+getProcess project id =
+    IdMap.get id project.processes |> Maybe.withDefault nullProcess
+
+
+getBelongsTo : Project -> Work -> List Part
+getBelongsTo project work =
+    List.filterMap (flip IdMap.get project.parts) work.belongsTo
+
+
+relativeLink : Project -> Work -> String
+relativeLink project work =
     let
         process =
-            IdMap.get work.process processes
-                |> Maybe.withDefault nullProcess
+            getWorkProcess project work
+
+        part =
+            getBelongsTo project work
+                |> List.minimumBy .order
+                |> Maybe.withDefault nullPart
+    in
+    Url.relative
+        [ process.name, part.name ]
+        [ Url.string "work" work.id ]
+
+
+title : Project -> Work -> String
+title project work =
+    let
+        process =
+            getWorkProcess project work
 
         belongsTo =
-            List.filterMap (flip IdMap.get parts) work.belongsTo
+            getBelongsTo project work
 
         part =
             List.minimumBy .order belongsTo
@@ -69,12 +107,11 @@ title processes parts work =
 
 
 worksTitle :
-    IdMap.Map Process Process
-    -> IdMap.Map Part Part
+    Project
     -> IdMap.Map Work Work
     -> List (Id Work)
     -> String
-worksTitle processes parts works ids =
+worksTitle project works ids =
     Maybe.withDefault "" <|
         case ids of
             [] ->
@@ -82,7 +119,7 @@ worksTitle processes parts works ids =
 
             [ id ] ->
                 IdMap.get id works
-                    |> Maybe.map (title processes parts)
+                    |> Maybe.map (title project)
 
             _ ->
                 let
@@ -156,11 +193,10 @@ statusLabel status =
 
 
 workLabel :
-    IdMap.Map Process Process
-    -> IdMap.Map Part Part
+    Project
     -> Work
     -> Html (Id Work)
-workLabel processes parts work =
+workLabel project work =
     let
         status =
             getStatus work
@@ -170,24 +206,23 @@ workLabel processes parts work =
         , onClick <| Id.self work
         ]
         [ icon <| iconClass status
-        , text <| title processes parts work
+        , text <| title project work
         ]
 
 
 waitingStatuses :
-    IdMap.Map Process Process
-    -> IdMap.Map Part Part
+    Project
     -> IdMap.Map Work Work
     -> Work
     -> Html (Id Work)
-waitingStatuses processes parts works work =
+waitingStatuses project works work =
     div [ class "ui horizontal list" ] <|
         flip List.filterMap work.waitingFor <|
             \(WorkRef r) ->
                 flip Maybe.map (IdMap.get (getId r) works) <|
                     \waiting ->
                         div [ class "item" ]
-                            [ workLabel processes parts waiting ]
+                            [ workLabel project waiting ]
 
 
 statusNumber : Status -> Int
@@ -207,6 +242,23 @@ statusNumber status =
 
         Complete ->
             4
+
+
+compare : Project -> Work -> Work -> Order
+compare project a b =
+    let
+        processOrder =
+            getWorkProcess project >> .order
+
+        partOrder =
+            getBelongsTo project >> List.map .order >> mean
+    in
+    case Basics.compare (processOrder a) (processOrder b) of
+        Basics.EQ ->
+            Basics.compare (partOrder a) (partOrder b)
+
+        order ->
+            order
 
 
 
@@ -336,29 +388,28 @@ isSelected selection work_ =
 
 
 selectionTitle :
-    IdMap.Map Process Process
-    -> IdMap.Map Part Part
+    Project
     -> IdMap.Map Work Work
     -> Selection
     -> String
-selectionTitle processes parts works selection =
+selectionTitle project works selection =
     Maybe.withDefault "" <|
         case IdSet.toList selection.processes of
             [] ->
                 case IdSet.toList selection.parts of
                     [] ->
                         Just <|
-                            worksTitle processes parts works <|
+                            worksTitle project works <|
                                 IdSet.toList selection.works
 
                     [ id ] ->
-                        IdMap.get id parts |> Maybe.map .name
+                        getPart project id |> .name |> Just
 
                     ids ->
                         let
                             selecteds =
-                                List.filterMap
-                                    (flip IdMap.get parts)
+                                List.map
+                                    (getPart project)
                                     ids
                         in
                         Maybe.map2
@@ -367,13 +418,12 @@ selectionTitle processes parts works selection =
                             (List.maximumBy .order selecteds)
 
             [ id ] ->
-                IdMap.get id processes
-                    |> Maybe.map .name
+                getProcess project id |> .name |> Just
 
             ids ->
                 let
                     selecteds =
-                        List.filterMap (flip IdMap.get processes) ids
+                        List.map (getProcess project) ids
                 in
                 Maybe.map2
                     (\min max -> min.name ++ " 〜 " ++ max.name)
@@ -397,22 +447,67 @@ processIs id =
 
 partIs : Id Part -> Lens Col Collection Col Collection
 partIs id =
-    where_ "belongsTo" Lens.CONTAINS Desc.id id
+    where_ "belongsTo" CONTAINS Desc.id id
 
 
 processIn : List (Id Process) -> Lens Col Collection Col Collection
 processIn id =
-    where_ "process" Lens.IN Desc.ids id
+    where_ "process" IN Desc.ids id
 
 
 samePartAs : Work -> Lens Col Collection Col Collection
 samePartAs work =
-    where_ "belongsTo" Lens.CONTAINS_ANY Desc.ids work.belongsTo
+    where_ "belongsTo" CONTAINS_ANY Desc.ids work.belongsTo
 
 
 downstreamOf : Id Work -> Lens Col Collection Col Collection
 downstreamOf id =
-    where_ "upstreams" Lens.CONTAINS Desc.id id
+    where_ "upstreams" CONTAINS Desc.id id
+
+
+isWorking : Id User -> Lens Col Collection Col Collection
+isWorking id =
+    where_ "working" CONTAINS Desc.reference (User.ref id)
+
+
+isReviewing : Id User -> Lens Col Collection Col Collection
+isReviewing id =
+    where_ "reviewing" CONTAINS Desc.reference (User.ref id)
+
+
+isWaitingUpstream : Id User -> Lens Col Collection Col Collection
+isWaitingUpstream id =
+    o
+        (where_ "staffs" CONTAINS Desc.reference (User.ref id))
+        (where_ "waitingFor" Lens.NE (Desc.list Desc.string) [])
+
+
+isWaitingSubmit : Id User -> Lens Col Collection Col Collection
+isWaitingSubmit id =
+    o (where_ "reviewers" CONTAINS Desc.reference (User.ref id)) <|
+        whereNotEmpty "working"
+
+
+isWaitingReview : Id User -> Lens Col Collection Col Collection
+isWaitingReview id =
+    o (where_ "staffs" CONTAINS Desc.reference (User.ref id)) <|
+        whereNotEmpty "reviewing"
+
+
+isCompletedAsStaff : Id User -> Lens Col Collection Col Collection
+isCompletedAsStaff id =
+    o (where_ "staffs" CONTAINS Desc.reference (User.ref id)) <|
+        o (whereEmpty "waitingFor") <|
+            o (whereEmpty "working") <|
+                whereEmpty "reviewing"
+
+
+isCompletedAsReviewer : Id User -> Lens Col Collection Col Collection
+isCompletedAsReviewer id =
+    o (where_ "reviewers" CONTAINS Desc.reference (User.ref id)) <|
+        o (whereEmpty "waitingFor") <|
+            o (whereEmpty "working") <|
+                whereEmpty "reviewing"
 
 
 
@@ -555,7 +650,7 @@ update auth projectId workId worksLens upd =
                                     diff work.reviewing deletion ++ addition
 
                                 else
-                                    work.working
+                                    work.reviewing
                         in
                         { work | reviewers = reviewers, reviewing = reviewing }
 
@@ -577,21 +672,30 @@ update auth projectId workId worksLens upd =
 
                             deletion =
                                 diff work.upstreams upstreams
-
-                            waitingFor =
-                                if
-                                    List.member (getStatus work)
-                                        [ NotAssigned, Waiting ]
-                                then
+                        in
+                        if
+                            List.member (getStatus work)
+                                [ NotAssigned, Waiting ]
+                        then
+                            let
+                                waitingFor =
                                     diff work.waitingFor deletion ++ addition
 
-                                else
-                                    work.waitingFor
-                        in
-                        { work
-                            | upstreams = upstreams
-                            , waitingFor = waitingFor
-                        }
+                                working =
+                                    if List.isEmpty waitingFor then
+                                        []
+
+                                    else
+                                        work.staffs
+                            in
+                            { work
+                                | upstreams = upstreams
+                                , waitingFor = waitingFor
+                                , working = working
+                            }
+
+                        else
+                            { work | upstreams = upstreams }
 
         SetUpstreamProcesses processes ->
             Update.andThen

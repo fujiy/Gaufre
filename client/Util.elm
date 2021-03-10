@@ -61,6 +61,15 @@ diff xs ys =
     List.filterNot (flip List.member ys) xs
 
 
+mean : List Float -> Float
+mean xs =
+    if List.isEmpty xs then
+        0
+
+    else
+        List.sum xs / (List.length xs |> toFloat)
+
+
 boolAttr : String -> Bool -> Attribute msg
 boolAttr name b =
     attribute name <|
