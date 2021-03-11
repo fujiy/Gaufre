@@ -92,6 +92,22 @@ type WorkRef
     = WorkRef (Reference () Work)
 
 
+type alias Activity =
+    { id : String
+    , type_ : ActivityType
+    , text : String
+    , from : Reference () User
+    , mentionTo : List (Reference () User)
+    }
+
+
+type ActivityType
+    = Comment
+    | Reply (Reference () Activity)
+    | Submit
+    | Review Bool
+
+
 
 -- Utilities
 -- Desc

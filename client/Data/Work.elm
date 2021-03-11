@@ -69,6 +69,15 @@ getBelongsTo project work =
     List.filterMap (flip IdMap.get project.parts) work.belongsTo
 
 
+isMember : Id User -> Work -> Bool
+isMember id work =
+    let
+        user =
+            User.ref id
+    in
+    List.member user work.staffs || List.member user work.reviewers
+
+
 relativeLink : Project -> Work -> String
 relativeLink project work =
     let
@@ -171,28 +180,48 @@ iconClass status =
             "check"
 
 
+statusColor : Status -> String
+statusColor status =
+    case status of
+        NotAssigned ->
+            "red"
+
+        Waiting ->
+            ""
+
+        Working ->
+            "blue"
+
+        Reviewing ->
+            "orange"
+
+        Complete ->
+            "green"
+
+
+statusTitle : Status -> String
+statusTitle status =
+    case status of
+        NotAssigned ->
+            "担当者がいません"
+
+        Waiting ->
+            "前工程待ち"
+
+        Working ->
+            "作業中"
+
+        Reviewing ->
+            "チェック中"
+
+        Complete ->
+            "完了"
+
+
 statusLabel : Status -> Html msg
 statusLabel status =
-    let
-        ( header, cls ) =
-            case status of
-                NotAssigned ->
-                    ( "担当者がいません", "red" )
-
-                Waiting ->
-                    ( "前工程待ち", "" )
-
-                Working ->
-                    ( "作業中", "" )
-
-                Reviewing ->
-                    ( "チェック中", "" )
-
-                Complete ->
-                    ( "完了", "green" )
-    in
-    div [ class "ui label", class cls ]
-        [ icon <| iconClass status, text header ]
+    div [ class "ui label", class <| statusColor status ]
+        [ icon <| iconClass status, text <| statusTitle status ]
 
 
 workLabel :

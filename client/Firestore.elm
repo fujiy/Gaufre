@@ -174,15 +174,15 @@ update p updater use (Firestore fs) =
             use upds.value
 
         requests =
-            Slice.toMap mergeRequest Get reqs
+            Slice.toMap mergeRequest getRequest reqs
                 |> PathMap.merge mergeRequest upds.requests
 
         updates =
-            PathMap.filterMap isUpdateRequest requests
+            PathMap.filterMap toUpdateRequest requests
                 |> PathMap.clean
 
         listenings =
-            PathMap.filterMap isGetRequest requests
+            PathMap.filterMap toGetRequest requests
                 |> PathMap.clean
 
         ( listens, unlistens ) =

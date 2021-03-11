@@ -106,7 +106,9 @@ o (Lens ll) (Lens lr) =
 
                                             uas =
                                                 runUpdater
-                                                    (ll.update None ubs.value)
+                                                    (ll.update noRequest
+                                                        ubs.value
+                                                    )
                                                     a
                                         in
                                         { value = uas.value
@@ -480,7 +482,7 @@ getRemote =
 --                     (Accessor s _) =
 --                         l.access a
 --                 in
---                 Slice.toMapDoc mergeRequest Get s
+--                 Slice.toMapDoc mergeRequest getRequest s
 --                     |> PathMap.toList
 --                     |> List.head
 --                     |> Maybe.unwrap Path.root Tuple.first
@@ -647,7 +649,7 @@ derefAccessor (RootDereferer f) (Accessor rs rr) d =
                 rr
                 |> Access.unremote
     in
-    Accessor (Slice.also rs Get ds) rdoc
+    Accessor (Slice.also rs getRequest ds) rdoc
 
 
 derefUpdater :
@@ -666,7 +668,7 @@ derefUpdater (RootDereferer f) acc u dc =
             case Remote.toMaybe rr of
                 Nothing ->
                     { value = d
-                    , requests = Slice.also rs Get Slice.nothing
+                    , requests = Slice.also rs getRequest Slice.nothing
                     , afterwards =
                         case rr of
                             Loading ->
@@ -683,7 +685,7 @@ derefUpdater (RootDereferer f) acc u dc =
 
                         updates upds =
                             { value = upds.value
-                            , requests = Slice.also rs Get upds.requests
+                            , requests = Slice.also rs getRequest upds.requests
                             , afterwards =
                                 Updater <| runUpdater upds.afterwards >> updates
                             }

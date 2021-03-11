@@ -82,7 +82,10 @@ taskList auth data project members task =
                 ]
                 [ div [ class "content" ]
                     [ div [ class "header" ]
-                        [ icon <| Client.taskIconClass task
+                        [ icon <|
+                            Client.taskIconClass task
+                                ++ " "
+                                ++ Client.taskColor task
                         , text <| Client.taskTitle task
                         ]
                     , div [ class "meta" ]

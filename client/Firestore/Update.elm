@@ -66,7 +66,7 @@ withCommand msg (Updater f) =
                     f a
             in
             if
-                PathMap.filterMap isUpdateRequest upd.requests
+                PathMap.filterMap toUpdateRequest upd.requests
                     |> PathMap.isEmpty
             then
                 { upd | afterwards = withCommand msg upd.afterwards }
@@ -127,7 +127,7 @@ fromDoc (Internal.Updater f) =
             in
             { value = upd.value
             , requests =
-                Slice.toMapDoc mergeRequest Get upd.requests
+                Slice.toMapDoc mergeRequest noRequest upd.requests
             , command = Cmd.none
             , afterwards = fromDoc upd.afterwards
             }
@@ -140,7 +140,7 @@ set :
     -> Updater a msg
 set (Lens l) (DocumentDesc d) r =
     l.update
-        (Set <| d.encoder <| Committing r)
+        (setRequest <| d.encoder <| Committing r)
         (Document d.empty (Committing r))
         |> fromDoc
 
@@ -150,7 +150,7 @@ delete :
     -> DocumentDesc s r
     -> Updater a msg
 delete (Lens l) (DocumentDesc d) =
-    l.update Internal.Delete (Document d.empty Failure)
+    l.update deleteRequest (Document d.empty Failure)
         |> fromDoc
 
 
@@ -186,7 +186,7 @@ alter (Lens l) (DocumentDesc d) f =
                                         Update r ->
                                             ( Committing r
                                             , Just <|
-                                                Set <|
+                                                setRequest <|
                                                     d.encoder <|
                                                         Committing r
                                             , Just r
@@ -200,7 +200,7 @@ alter (Lens l) (DocumentDesc d) f =
 
                                         Delete ->
                                             ( Failure
-                                            , Just Internal.Delete
+                                            , Just deleteRequest
                                             , Nothing
                                             )
                             in
@@ -220,7 +220,7 @@ alter (Lens l) (DocumentDesc d) f =
                         Loading ->
                             { value = a
                             , requests =
-                                Slice.toMapDoc mergeRequest Get paths
+                                Slice.toMapDoc mergeRequest getRequest paths
                             , command = Cmd.none
                             , afterwards = updater ()
                             }
@@ -302,7 +302,7 @@ andThen acc upd =
 
                         Loading ->
                             { value = r
-                            , requests = Slice.toMap mergeRequest Get s
+                            , requests = Slice.toMap mergeRequest getRequest s
                             , command = Cmd.none
                             , afterwards = updater ()
                             }

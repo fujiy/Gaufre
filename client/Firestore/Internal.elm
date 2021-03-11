@@ -11,6 +11,7 @@ import Firestore.Path.Map.Slice as Slice exposing (Slice)
 import Firestore.Remote exposing (Remote(..))
 import Json.Encode as Encode exposing (Value)
 import List.Extra as List
+import Maybe.Extra as Maybe
 
 
 type Collection s r
@@ -76,12 +77,8 @@ type alias Item =
     Request
 
 
-type Request
-    = None
-    | Get
-    | Set Value
-    | Add Value
-    | Delete
+type alias Request =
+    { get : Bool, set : Bool, value : Maybe Value }
 
 
 queryKey : String -> String -> Value -> QueryKey
@@ -101,44 +98,48 @@ coerce (Accessor path ra) =
 
 mergeRequest : Request -> Request -> Request
 mergeRequest x y =
-    case ( x, y ) of
-        ( None, _ ) ->
-            y
-
-        ( _, None ) ->
-            x
-
-        ( Get, _ ) ->
-            y
-
-        ( _, Get ) ->
-            x
-
-        _ ->
-            x
+    { get = x.get || y.get
+    , set = x.set || y.set
+    , value = Maybe.or x.value y.value
+    }
 
 
-isGetRequest : Request -> Maybe ()
-isGetRequest req =
-    case req of
-        None ->
-            Nothing
+toGetRequest : Request -> Maybe ()
+toGetRequest req =
+    if req.get then
+        Just ()
 
-        _ ->
-            Just ()
+    else
+        Nothing
 
 
-isUpdateRequest : Request -> Maybe Request
-isUpdateRequest req =
-    case req of
-        None ->
-            Nothing
+toUpdateRequest : Request -> Maybe Request
+toUpdateRequest req =
+    if req.set then
+        Just { req | get = False }
 
-        Get ->
-            Nothing
+    else
+        Nothing
 
-        _ ->
-            Just req
+
+noRequest : Request
+noRequest =
+    Request False False Nothing
+
+
+getRequest : Request
+getRequest =
+    Request True False Nothing
+
+
+deleteRequest : Request
+deleteRequest =
+    Request False True Nothing
+
+
+setRequest : Value -> Request
+setRequest v =
+    Request False True (Just v)
 
 
 noUpdates : a -> Updates p q a

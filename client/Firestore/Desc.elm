@@ -239,7 +239,7 @@ collection name getter (DocumentDesc d) (CollectionDesc c) =
                                                     Ok doc
 
                                                 Just Clear ->
-                                                    Ok doc
+                                                    Ok Loading
 
                                                 Just (Got v) ->
                                                     Decode.decodeValue
@@ -337,48 +337,42 @@ path =
 request : Desc Request
 request =
     Desc
-        (\u ->
-            case u of
-                None ->
-                    Encode.null
+        (\req ->
+            if req.set then
+                case req.value of
+                    Just v ->
+                        Encode.object
+                            [ ( "type", Encode.string "set" ), ( "value", v ) ]
 
-                Get ->
-                    Encode.object [ ( "type", Encode.string "get" ) ]
+                    Nothing ->
+                        Encode.object [ ( "type", Encode.string "delete" ) ]
 
-                Set v ->
-                    Encode.object
-                        [ ( "type", Encode.string "set" ), ( "value", v ) ]
-
-                Add v ->
-                    Encode.object
-                        [ ( "type", Encode.string "add" ), ( "value", v ) ]
-
-                Delete ->
-                    Encode.object [ ( "type", Encode.string "delete" ) ]
+            else
+                Encode.null
         )
         (Decode.oneOf
             [ Decode.andThen
                 (\t ->
                     case t of
                         "get" ->
-                            Decode.succeed Get
+                            Decode.succeed <| Request True False Nothing
 
                         "set" ->
-                            Decode.map Set <|
+                            Decode.map (Request False True << Just) <|
                                 Decode.field "value" Decode.value
 
                         "add" ->
-                            Decode.map Add <|
+                            Decode.map (Request False True << Just) <|
                                 Decode.field "value" Decode.value
 
                         "delete" ->
-                            Decode.succeed Delete
+                            Decode.succeed <| Request False True Nothing
 
                         _ ->
                             Decode.fail <| "unknown type: " ++ t
                 )
                 (Decode.field "type" Decode.string)
-            , Decode.succeed None
+            , Decode.succeed <| Request False False Nothing
             ]
         )
 

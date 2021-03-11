@@ -314,7 +314,7 @@ tableRow auth model project partIds processes works partId part =
                                 partId
                                 part
                             )
-                            (workCell model partIds process partId part)
+                            (workCell auth model partIds process partId part)
                     )
                 )
                 processes
@@ -337,14 +337,15 @@ emptyCell role processId partId part =
 
 
 workCell :
-    Model
+    Auth
+    -> Model
     -> List (Id Part)
     -> Process
     -> Id Part
     -> Part
     -> Work
     -> Html Msg
-workCell model partIds process partId part work =
+workCell auth model partIds process partId part work =
     let
         selected =
             Work.isSelected model.selection work
@@ -371,7 +372,17 @@ workCell model partIds process partId part work =
                 , onDragEnter <| SelectWork (Id.self work) (not selected) False
                 , onDoubleClick <| MoveToWork process part work
                 ]
-                [ icon <| Work.iconClass status ]
+                [ Html.i
+                    [ class <| Work.iconClass status
+                    , class "icon"
+                    , if Work.isMember (myId auth) work then
+                        class <| Work.statusColor status
+
+                      else
+                        class "disabled"
+                    ]
+                    []
+                ]
 
 
 partRowSpan : List (Id Part) -> Id Part -> Work -> Int

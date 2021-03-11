@@ -19,7 +19,7 @@ import Firestore.Remote exposing (Remote(..))
 import Firestore.Update as Update exposing (Updater)
 import GDrive exposing (FileMeta)
 import Html exposing (Html, button, div, img, input, label, node, text)
-import Html.Attributes exposing (attribute, class, hidden, href, placeholder, src, style, type_, value)
+import Html.Attributes exposing (accept, attribute, class, hidden, href, placeholder, src, style, type_, value)
 import Html.Events exposing (onClick, onDoubleClick, onInput)
 import List.Extra as List
 import Maybe.Extra as Maybe
@@ -359,6 +359,9 @@ view auth model data project =
 
                 title =
                     Work.title project work
+
+                status =
+                    Work.getStatus work
             in
             div [ class "ui grid" ]
                 [ div [ class "row" ] []
@@ -372,6 +375,34 @@ view auth model data project =
                                 , div [ class "meta" ]
                                     [ breadcrumb model work
                                         |> Html.map MoveToFolder
+                                    ]
+                                , div [ class "description" ]
+                                    [ div [ class "ui horizontal list" ]
+                                        [ div [ class "item" ]
+                                            [ Work.statusLabel status ]
+                                        , div [ class "item" ]
+                                            [ text "担当："
+                                            , User.list editable
+                                                members
+                                                staffs
+                                                []
+                                                |> Html.map
+                                                    (WorkUpdate
+                                                        << Work.SetStaffs
+                                                    )
+                                            ]
+                                        , div [ class "item" ]
+                                            [ text "チェック："
+                                            , User.list editable
+                                                members
+                                                reviewers
+                                                []
+                                                |> Html.map
+                                                    (WorkUpdate
+                                                        << Work.SetReviewers
+                                                    )
+                                            ]
+                                        ]
                                     ]
                                 ]
                             , div
@@ -406,18 +437,8 @@ view auth model data project =
                                             [ text "ファイルを追加する" ]
                                 ]
                             , div [ class "content" ]
-                                [ Html.p []
-                                    [ text "担当："
-                                    , User.list editable members staffs []
-                                        |> Html.map
-                                            (WorkUpdate << Work.SetStaffs)
-                                    ]
-                                , Html.p []
-                                    [ text "チェック："
-                                    , User.list editable members reviewers []
-                                        |> Html.map
-                                            (WorkUpdate << Work.SetReviewers)
-                                    ]
+                                [ div [ class "header" ]
+                                    [ text "履歴" ]
                                 ]
                             ]
                         ]
@@ -492,7 +513,24 @@ fileActions model =
             , classIf model.uploading "loading"
             , attributeIf (not model.uploading)
                 "data-tooltip"
-                "ファイルまたはフォルダをアップロード"
+                "ファイルをアップロード"
+            , attribute "data-position" "bottom center"
+            ]
+            [ icon "file image"
+            , input
+                [ type_ "file"
+                , hidden True
+                , attribute "multiple" ""
+                , onChangeFiles <| ModalState << UploadModal
+                ]
+                []
+            ]
+        , label
+            [ class "ui button"
+            , classIf model.uploading "loading"
+            , attributeIf (not model.uploading)
+                "data-tooltip"
+                "フォルダをアップロード"
             , attribute "data-position" "bottom center"
             ]
             [ icon "cloud upload"
