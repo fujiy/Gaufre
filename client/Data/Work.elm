@@ -47,6 +47,13 @@ getWorkProcess project work =
         |> Maybe.withDefault nullProcess
 
 
+getWorkPart : Project -> Work -> Part
+getWorkPart project =
+    getBelongsTo project
+        >> List.minimumBy .order
+        >> Maybe.withDefault nullPart
+
+
 getPart : Project -> Id Part -> Part
 getPart project id =
     IdMap.get id project.parts |> Maybe.withDefault nullPart
@@ -69,9 +76,7 @@ relativeLink project work =
             getWorkProcess project work
 
         part =
-            getBelongsTo project work
-                |> List.minimumBy .order
-                |> Maybe.withDefault nullPart
+            getWorkPart project work
     in
     Url.relative
         [ process.name, part.name ]
@@ -187,34 +192,28 @@ statusLabel status =
                     ( "完了", "green" )
     in
     div [ class "ui label", class cls ]
-        [ icon <| iconClass status
-        , text header
-        ]
+        [ icon <| iconClass status, text header ]
 
 
 workLabel :
     Project
     -> Work
-    -> Html (Id Work)
+    -> Html Work
 workLabel project work =
     let
         status =
             getStatus work
     in
     Html.a
-        [ class "ui label"
-        , onClick <| Id.self work
-        ]
-        [ icon <| iconClass status
-        , text <| title project work
-        ]
+        [ class "ui label", onClick work ]
+        [ icon <| iconClass status, text <| title project work ]
 
 
 waitingStatuses :
     Project
     -> IdMap.Map Work Work
     -> Work
-    -> Html (Id Work)
+    -> Html Work
 waitingStatuses project works work =
     div [ class "ui horizontal list" ] <|
         flip List.filterMap work.waitingFor <|

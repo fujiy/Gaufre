@@ -111,7 +111,10 @@ update auth msg m projectId model =
                 | selection =
                     { noSelection
                         | processes =
-                            IdSet.change id select clear model.selection.processes
+                            IdSet.change id
+                                select
+                                clear
+                                model.selection.processes
                     }
               }
             , Update.none
@@ -169,7 +172,9 @@ view auth model data project =
     in
     flip2 Access.map2
         (Access.access
-            (o (Data.project <| Id.self project) <| o Project.works Lens.getAll)
+            (o (Data.project <| Id.self project) <|
+                o Project.works Lens.getAll
+            )
             data
         )
         (Access.access (o (Project.members project) Lens.gets) data)
@@ -356,7 +361,7 @@ workCell model partIds process partId part work =
 
         n ->
             td
-                [ class "center aligned"
+                [ class "center aligned selectable"
                 , classIf selected "active"
                 , classIf (status == Work.Complete) "positive"
                 , style "cursor" "pointer"
@@ -454,6 +459,15 @@ actions model project role members works =
 
         authority =
             Project.authority role
+
+        moveTo work =
+            MoveToWork
+                (Work.getWorkProcess project work)
+                (Work.getWorkPart project work)
+                work
+
+        select work =
+            SelectWork (Id.self work) True True
     in
     div
         [ class "ui six wide column grid card"
@@ -499,14 +513,20 @@ actions model project role members works =
 
                     _ ->
                         text ""
-            , div [ class "header" ]
+            , (case selection of
+                [ work ] ->
+                    Html.a [ onClick <| moveTo work, class "header" ]
+
+                _ ->
+                    div [ class "header" ]
+              )
                 [ text <|
                     Work.selectionTitle project allWorks model.selection
                 ]
             , div [ class "description" ] <|
                 List.map Work.statusLabel statuses
             , if List.member Work.Waiting statuses then
-                Html.map (\_ -> None) <|
+                Html.map select <|
                     div [ class "description" ] <|
                         span [] [ text "未完了の前工程：" ]
                             :: List.map
@@ -538,8 +558,9 @@ actions model project role members works =
                             (WorkUpdate selectedIds << Work.SetReviewers)
                     ]
                 ]
-        , div [ class "content" ]
-            [ div [ class "header" ] [ text "スケジュール" ] ]
+
+        -- , div [ class "content" ]
+        --     [ div [ class "header" ] [ text "スケジュール" ] ]
         ]
 
 

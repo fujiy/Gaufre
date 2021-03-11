@@ -8,7 +8,7 @@ import Firestore.Lens as Lens exposing (o)
 import Firestore.Path.Id as Id exposing (Id)
 import Firestore.Update as Update exposing (Updater)
 import Html exposing (Html, button, div, h1, img, input, node, table, tbody, td, text, th, thead, tr)
-import Html.Attributes exposing (class, colspan, placeholder, src, type_)
+import Html.Attributes as Attr exposing (attribute, class, colspan, placeholder, src, type_)
 import Html.Events as Events exposing (onClick, onInput)
 import Json.Decode as Decode
 import Util exposing (..)
@@ -73,7 +73,7 @@ view auth model data project =
                     ]
                 , table [ class "ui single line table" ]
                     [ thead [] []
-                    , tbody [] <| List.map (tableRow project) members
+                    , tbody [] <| List.map (tableRow auth project) members
                     ]
                 , modalView model project
                 ]
@@ -94,8 +94,8 @@ tableHeader role =
         ]
 
 
-tableRow : Project -> User -> Html msg
-tableRow project user =
+tableRow : Auth -> Project -> User -> Html Msg
+tableRow auth project user =
     tr []
         [ td [ class "collapsing" ]
             [ img [ class "ui avatar image", src user.image ] [] ]
@@ -104,17 +104,73 @@ tableRow project user =
         , td []
             [ div [ class "header" ] [ text user.profile ] ]
         , td [ class "collapsing" ]
-            [ case Project.userRole project <| Id.self user of
-                Project.Owner ->
-                    text "プロジェクトオーナー"
-
-                Project.Admin ->
-                    text "管理者"
-
-                Project.Staff ->
-                    text ""
+            [ roleDropdown
+                (user.id == auth.uid)
+                (Project.myRole project auth)
+                (Project.userRole project <| Id.self user)
+                |> Html.map
+                    (\role ->
+                        ProjectUpdate <|
+                            Project.SetMemberRole role <|
+                                Id.self user
+                    )
             ]
         ]
+
+
+roleDropdown : Bool -> Project.Role -> Project.Role -> Html Project.Role
+roleDropdown isMe myRole role =
+    let
+        ( id, txt ) =
+            case role of
+                Project.Owner ->
+                    ( "owner", "プロジェクトオーナー" )
+
+                Project.Admin ->
+                    ( "admin", "管理者" )
+
+                Project.Staff ->
+                    ( "staff", "メンバー" )
+    in
+    if
+        (Project.authority myRole).manageMembers
+            && role
+            /= Project.Owner
+            && not isMe
+    then
+        node "ui-dropdown"
+            [ class "ui selection dropdown select-text"
+            , attribute "value" id
+            , onChangeValues
+                |> Attr.map
+                    (\s ->
+                        case s of
+                            [ "owner" ] ->
+                                Project.Owner
+
+                            [ "admin" ] ->
+                                Project.Admin
+
+                            [ "staff" ] ->
+                                Project.Staff
+
+                            _ ->
+                                role
+                    )
+            ]
+            [ input [ type_ "hidden" ] []
+            , Html.i [ class "dropdown icon" ] []
+            , div [ class "default text" ] [ text "権限" ]
+            , div [ class "menu" ]
+                [ div [ class "item", attribute "data-value" "staff" ]
+                    [ text "メンバー" ]
+                , div [ class "item", attribute "data-value" "admin" ]
+                    [ text "管理者" ]
+                ]
+            ]
+
+    else
+        text txt
 
 
 modalView : Model -> Project -> Html Msg
@@ -143,7 +199,9 @@ modalView model project =
                     , button
                         [ class "ui primary labeled right floated icon button"
                         , classIf (email == "") "disabled"
-                        , onClick <| ProjectUpdate <| Project.InviteMember email
+                        , onClick <|
+                            ProjectUpdate <|
+                                Project.InviteMember email
                         ]
                         [ icon "user plus", text "招待" ]
                     ]

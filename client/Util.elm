@@ -70,6 +70,20 @@ mean xs =
         List.sum xs / (List.length xs |> toFloat)
 
 
+pushUnique : a -> List a -> List a
+pushUnique a xs =
+    case xs of
+        [] ->
+            [ a ]
+
+        x :: xs_ ->
+            if x == a then
+                x :: xs_
+
+            else
+                x :: pushUnique a xs_
+
+
 boolAttr : String -> Bool -> Attribute msg
 boolAttr name b =
     attribute name <|

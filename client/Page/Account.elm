@@ -31,6 +31,7 @@ type Msg
     | SelectFile User
     | UploadImage File
     | SetImage GDrive.FileMeta
+    | SaveImage String
     | SignOut
     | None
 
@@ -73,7 +74,7 @@ update auth msg model =
             ( { model
                 | profile =
                     Maybe.map
-                        (\user -> { user | image = file.thumbnailLink })
+                        (\user -> { user | image = file.webContentLink })
                         model.profile
               }
             , Update.command <|
@@ -82,13 +83,15 @@ update auth msg model =
                         file.id
                         { role = GDrive.Reader, type_ = GDrive.Anyone }
                         |> Cmd.map
-                            (\r ->
-                                let
-                                    _ =
-                                        Debug.log "P" r
-                                in
-                                None
-                            )
+                            (\_ -> SaveImage file.webContentLink)
+            )
+
+        SaveImage image ->
+            ( model
+            , Update.map (\_ -> None) <|
+                Update.modify (User.me auth) userDesc <|
+                    \user ->
+                        { user | image = image }
             )
 
         SignOut ->
@@ -123,18 +126,25 @@ view auth model data =
                         [ tr []
                             [ td [] [ text "プロフィール画像" ]
                             , td []
-                                [ Html.a
+                                [ img
                                     [ class "ui tiny circular image"
-                                    , href ""
-                                    , onClick <| SelectFile profile
+                                    , src profile.image
                                     ]
-                                    [ img
-                                        [ class "ui tiny image"
-                                        , src profile.image
-                                        ]
-                                        []
-                                    ]
+                                    []
                                 ]
+
+                            -- [ Html.a
+                            --     [ class "ui tiny circular image"
+                            --     , href ""
+                            --     , onClick <| SelectFile profile
+                            --     ]
+                            --     [ img
+                            --         [ class "ui tiny image"
+                            --         , src profile.image
+                            --         ]
+                            --         []
+                            --     ]
+                            -- ]
                             ]
                         , tr []
                             [ td [] [ text "名前" ]

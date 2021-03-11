@@ -16,7 +16,7 @@ import Firestore.Update as Update exposing (Updater)
 import GDrive
 import List.Extra as List
 import Maybe.Extra as Maybe
-import Util exposing (flip)
+import Util exposing (flip, pushUnique)
 
 
 type Role
@@ -188,10 +188,11 @@ type Update
     = Join
     | Add GDrive.FileMeta
     | AddProcess Process GDrive.FileMeta
-    | AddPart (List ( Id Process, Process )) (Id Part) Part
-    | InviteMember String
     | SetProcessUpstreams Bool (Id Process) (List (Id Process))
+    | AddPart (List ( Id Process, Process )) (Id Part) Part
     | DeletePart (Id Part)
+    | InviteMember String
+    | SetMemberRole Role (Id User)
     | WorkUpdate (List (Id Work)) Work.Update
     | AndThen Update Update
     | None
@@ -254,60 +255,6 @@ update auth projectId upd =
                                     project.processes
                         }
 
-        InviteMember name ->
-            let
-                email =
-                    name ++ "@gmail.com"
-            in
-            Update.andThen
-                (Access.access <|
-                    (o users <|
-                        o (where_ "email" Lens.EQ Desc.string email)
-                            Lens.getAll
-                    )
-                )
-                (\us ->
-                    case us of
-                        [ user ] ->
-                            Update.all
-                                [ Update.map (\_ -> None) <|
-                                    Update.modify lens projectDesc <|
-                                        \p ->
-                                            { p
-                                                | members =
-                                                    User.ref (Id.self user)
-                                                        :: p.members
-                                            }
-                                , Update.command <|
-                                    \_ ->
-                                        GDrive.permissions_create auth.token
-                                            (unId projectId)
-                                            { role = GDrive.Writer
-                                            , type_ = GDrive.User user.email
-                                            }
-                                            |> Cmd.map (\_ -> None)
-                                ]
-
-                        _ ->
-                            Update.none
-                )
-
-        AddPart processes partId part ->
-            Update.all
-                [ Update.map (\_ -> None) <|
-                    Update.modify lens projectDesc <|
-                        \p -> { p | parts = IdMap.insert partId part p.parts }
-                , List.sortBy (Tuple.second >> .order) processes
-                    |> List.foldr
-                        (\( processId, process ) wupd ->
-                            Work.AndThen wupd <|
-                                Work.Add processId process partId part.name
-                        )
-                        Work.None
-                    |> WorkUpdate [ Id.null ]
-                    |> Update.succeed
-                ]
-
         SetProcessUpstreams updateExisting processId upstreams ->
             Update.all
                 [ Update.map (\_ -> None) <|
@@ -344,6 +291,22 @@ update auth projectId upd =
                     Update.none
                 ]
 
+        AddPart processes partId part ->
+            Update.all
+                [ Update.map (\_ -> None) <|
+                    Update.modify lens projectDesc <|
+                        \p -> { p | parts = IdMap.insert partId part p.parts }
+                , List.sortBy (Tuple.second >> .order) processes
+                    |> List.foldr
+                        (\( processId, process ) wupd ->
+                            Work.AndThen wupd <|
+                                Work.Add processId process partId part.name
+                        )
+                        Work.None
+                    |> WorkUpdate [ Id.null ]
+                    |> Update.succeed
+                ]
+
         DeletePart partId ->
             Update.all
                 [ Update.map (\_ -> None) <|
@@ -365,6 +328,70 @@ update auth projectId upd =
                             WorkUpdate (List.map Id.self ws) Work.Delete
                     )
                 ]
+
+        InviteMember name ->
+            let
+                email =
+                    name ++ "@gmail.com"
+            in
+            Update.andThen
+                (Access.access <|
+                    (o users <|
+                        o (where_ "email" Lens.EQ Desc.string email)
+                            Lens.getAll
+                    )
+                )
+                (\us ->
+                    case us of
+                        [ user ] ->
+                            Update.all
+                                [ Update.map (\_ -> None) <|
+                                    Update.modify lens projectDesc <|
+                                        \p ->
+                                            let
+                                                userRef =
+                                                    User.ref <|
+                                                        Id.self user
+                                            in
+                                            { p
+                                                | members =
+                                                    pushUnique userRef
+                                                        p.members
+                                            }
+                                , Update.command <|
+                                    \_ ->
+                                        GDrive.permissions_create auth.token
+                                            (unId projectId)
+                                            { role = GDrive.Writer
+                                            , type_ = GDrive.User user.email
+                                            }
+                                            |> Cmd.map (\_ -> None)
+                                ]
+
+                        _ ->
+                            Update.none
+                )
+
+        SetMemberRole role userId ->
+            Update.map (\_ -> None) <|
+                Update.modify lens projectDesc <|
+                    \p ->
+                        let
+                            user =
+                                User.ref userId
+                        in
+                        case role of
+                            Staff ->
+                                { p | admins = List.remove user p.admins }
+
+                            Admin ->
+                                { p | admins = pushUnique user p.admins }
+
+                            Owner ->
+                                { p
+                                    | admins = pushUnique user p.admins
+                                    , owner = user
+                                }
 
         WorkUpdate ids wupd ->
             List.map
