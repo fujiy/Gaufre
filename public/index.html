@@ -90,24 +90,45 @@
 
        function signedIn(user) {
            googleUser = user
-           const googleIdToken = user.getAuthResponse().id_token
+           const response = user.getAuthResponse()
+           const googleIdToken = response.id_token
            firebase.auth().signInWithCredential(
                firebase.auth.GoogleAuthProvider.credential(googleIdToken)
            ).then(r => {
                console.log('signed in', r.user)
+               const userData = {
+                   id: r.user.uid,
+                   name: r.user.displayName,
+                   image: r.user.photoURL,
+                   email: r.user.email
+               }
                app.ports.authorized.send({
                    auth: {
                        uid: r.user.uid,
-                       token: user.getAuthResponse().access_token
+                       token: response.access_token
                    },
-                   user: {
-                       id: r.user.uid,
-                       name: r.user.displayName,
-                       image: r.user.photoURL,
-                       email: r.user.email
-                   }
+                   user: userData
                })
+
+               setTimeout(_ => {refresh(userData)},
+                          response.expires_in * 1000)
            })
+       }
+
+       function refresh(userData) {
+           googleUser.reloadAuthResponse().then(response => {
+               console.log('refreshed', response)
+               app.ports.authorized.send({
+                   auth: {
+                       uid: userData.id,
+                       token: response.access_token
+                   },
+                   user: userData
+               })
+               setTimeout(_ => {refresh(userData)},
+                          response.expires_in * 1000)
+           })
+
        }
 
       document.addEventListener('DOMContentLoaded', function() {

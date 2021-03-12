@@ -124,7 +124,6 @@ function initialize(app) {
             includeMetadataChanges: true,
           },
           (querySnapshot) => {
-            console.log(querySnapshot.metadata);
             if (querySnapshot.metadata.hasPendingWrites) return;
 
             const map = { item: null, sub: [], q: [] };
@@ -195,7 +194,6 @@ function initialize(app) {
         tree._listener = ref.onSnapshot(
           { includeMetadataChanges: true },
           (doc) => {
-            console.log(doc.data().staffs, doc.metadata);
             if (doc.metadata.hasPendingWrites) return;
 
             const updates = builder({ item: makeDoc(doc), sub: [] });

@@ -114,6 +114,24 @@ update msg model =
 
         SignedIn r ->
             case msg of
+                Authorized auth _ ->
+                    let
+                        ( fs, mview, cmd ) =
+                            Firestore.update
+                                firestoreCmdPort
+                                Update.none
+                                (pageView auth r.page)
+                                r.firestore
+                    in
+                    ( SignedIn
+                        { r
+                            | auth = auth
+                            , firestore = fs
+                            , view = Maybe.withDefault r.view mview
+                        }
+                    , cmd
+                    )
+
                 SignOut ->
                     ( NotSignedIn { navKey = r.auth.navKey, url = r.url }
                     , signOut ()
@@ -270,9 +288,24 @@ subscriptions model =
                         , profile = ""
                         }
 
-        SignedIn { firestore } ->
-            Firestore.watch firestoreSubPort firestore
-                |> Sub.map Firestore
+        SignedIn s ->
+            Sub.batch
+                [ authorized <|
+                    \{ auth, user } ->
+                        Authorized
+                            { uid = auth.uid
+                            , token = auth.token
+                            , navKey = s.auth.navKey
+                            }
+                            { id = user.id
+                            , name = user.name
+                            , image = user.image
+                            , email = user.email
+                            , profile = ""
+                            }
+                , Firestore.watch firestoreSubPort s.firestore
+                    |> Sub.map Firestore
+                ]
 
 
 
