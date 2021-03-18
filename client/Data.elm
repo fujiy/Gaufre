@@ -3,13 +3,14 @@ module Data exposing (..)
 import Array exposing (Array)
 import Browser.Navigation as Nav
 import Firestore exposing (..)
-import Firestore.Desc as Desc exposing (Desc, DocumentDesc, FirestoreDesc, field, optional)
-import Firestore.Lens as Lens exposing (o, where_)
+import Firestore.Desc as Desc exposing (Desc, DocumentDesc, FirestoreDesc, field, maybe, optional)
+import Firestore.Lens as Lens exposing (o)
 import Firestore.Path as Path
 import Firestore.Path.Id as Id exposing (Id, SelfId, unId)
 import Firestore.Path.Id.Map as IdMap
 import GDrive
 import Maybe.Extra as Maybe
+import Time
 
 
 
@@ -20,6 +21,8 @@ type alias Auth =
     { uid : String
     , token : String
     , navKey : Nav.Key
+    , zone : Time.Zone
+    , now : Time.Posix
     }
 
 
@@ -56,7 +59,7 @@ type alias Project =
 
 
 type alias ProjectSub =
-    { works : Collection () Work
+    { works : Collection WorkSub Work
     }
 
 
@@ -74,6 +77,10 @@ type alias Work =
     }
 
 
+type alias WorkSub =
+    { activities : Collection () Activity }
+
+
 type alias Process =
     { name : String
     , order : Float
@@ -89,23 +96,29 @@ type alias Part =
 
 
 type WorkRef
-    = WorkRef (Reference () Work)
+    = WorkRef (Reference WorkSub Work)
 
 
 type alias Activity =
-    { id : String
+    { id : SelfId
     , type_ : ActivityType
+    , createdAt : Timestamp
     , text : String
-    , from : Reference () User
+    , author : Reference () User
+    , replyTo : Maybe ActivityRef
+    , reject : Bool
     , mentionTo : List (Reference () User)
     }
 
 
+type ActivityRef
+    = ActivityRef (Reference () Activity)
+
+
 type ActivityType
     = Comment
-    | Reply (Reference () Activity)
     | Submit
-    | Review Bool
+    | Review
 
 
 
@@ -158,10 +171,10 @@ workRefDesc =
     Desc.map (Desc.iso WorkRef (\(WorkRef r) -> r)) Desc.reference
 
 
-workDesc : DocumentDesc () Work
+workDesc : DocumentDesc WorkSub Work
 workDesc =
-    Desc.documentWithId Work <|
-        field "name" .name Desc.string
+    Desc.documentWithIdAndSubs Work
+        (field "name" .name Desc.string
             >> field "process" .process Desc.id
             >> field "belongsTo" .belongsTo Desc.ids
             >> optional "staffs" .staffs [] Desc.references
@@ -170,6 +183,9 @@ workDesc =
             >> optional "waitingFor" .waitingFor [] (Desc.list workRefDesc)
             >> optional "working" .working [] Desc.references
             >> optional "reviewing" .reviewing [] Desc.references
+        )
+        WorkSub
+        (Desc.collection "activities" .activities activityDesc)
 
 
 processDesc : Desc Process
@@ -186,6 +202,30 @@ partDesc =
         field "name" .name Desc.string
             >> field "order" .order Desc.float
             >> Desc.maybe "parent" .parent Desc.string
+
+
+activityDesc : DocumentDesc () Activity
+activityDesc =
+    Desc.documentWithId Activity <|
+        field "type"
+            .type_
+            (Desc.enum
+                [ ( "comment", Comment )
+                , ( "submit", Submit )
+                , ( "review", Review )
+                ]
+            )
+            >> field "createdAt" .createdAt Desc.timestamp
+            >> field "text" .text Desc.string
+            >> field "author" .author Desc.reference
+            >> maybe "replyTo" .replyTo activityRefDesc
+            >> field "reject" .reject Desc.bool
+            >> field "mentionTo" .mentionTo Desc.references
+
+
+activityRefDesc : Desc ActivityRef
+activityRefDesc =
+    Desc.map (Desc.iso ActivityRef (\(ActivityRef r) -> r)) Desc.reference
 
 
 

@@ -145,19 +145,19 @@ taskWorks auth data projectId task =
         Access.remote <|
             case task of
                 Working ->
-                    Access.access (lens Work.isWorking) data
+                    Access.access (lens Work.userIsWorking) data
 
                 Reviewing ->
-                    Access.access (lens Work.isReviewing) data
+                    Access.access (lens Work.userIsReviewing) data
 
                 WaitingUpstream ->
-                    Access.access (lens Work.isWaitingUpstream) data
+                    Access.access (lens Work.userIsWaitingUpstream) data
 
                 WaitingSubmit ->
-                    Access.access (lens Work.isWaitingSubmit) data
+                    Access.access (lens Work.userIsWaitingSubmit) data
 
                 WaitingReview ->
-                    Access.access (lens Work.isWaitingReview) data
+                    Access.access (lens Work.userIsWaitingReview) data
 
                 Complete ->
                     Access.map2 (++)

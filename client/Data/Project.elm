@@ -210,26 +210,22 @@ update auth projectId upd =
     in
     case upd of
         Join ->
-            Update.map (\_ -> None) <|
-                Update.modify (myClient auth) clientDesc <|
+            Update.modify (myClient auth) clientDesc <|
+                \client ->
+                    { client
+                        | projects =
+                            Array.push (ref projectId) client.projects
+                    }
+
+        Add folder ->
+            Update.all
+                [ Update.modify (myClient auth) clientDesc <|
                     \client ->
                         { client
                             | projects =
                                 Array.push (ref projectId) client.projects
                         }
-
-        Add folder ->
-            Update.all
-                [ Update.map (\_ -> None) <|
-                    Update.modify (myClient auth) clientDesc <|
-                        \client ->
-                            { client
-                                | projects =
-                                    Array.push (ref projectId) client.projects
-                            }
-                , Update.map (\_ -> None) <|
-                    Update.set lens projectDesc <|
-                        init folder (Data.myRef auth)
+                , Update.set lens projectDesc <| init folder (Data.myRef auth)
                 , Update.batch <|
                     flip List.map Work.defaultProcesses <|
                         \process _ ->
@@ -245,32 +241,30 @@ update auth projectId upd =
                 ]
 
         AddProcess process folder ->
-            Update.map (\_ -> None) <|
-                Update.modify lens projectDesc <|
-                    \project ->
-                        { project
-                            | processes =
-                                IdMap.insert (Id.fromString folder.id)
-                                    process
-                                    project.processes
-                        }
+            Update.modify lens projectDesc <|
+                \project ->
+                    { project
+                        | processes =
+                            IdMap.insert (Id.fromString folder.id)
+                                process
+                                project.processes
+                    }
 
         SetProcessUpstreams updateExisting processId upstreams ->
             Update.all
-                [ Update.map (\_ -> None) <|
-                    Update.modify lens projectDesc <|
-                        \project ->
-                            { project
-                                | processes =
-                                    IdMap.modify processId
-                                        (\process ->
-                                            { process
-                                                | upstreams =
-                                                    List.map unId upstreams
-                                            }
-                                        )
-                                        project.processes
-                            }
+                [ Update.modify lens projectDesc <|
+                    \project ->
+                        { project
+                            | processes =
+                                IdMap.modify processId
+                                    (\process ->
+                                        { process
+                                            | upstreams =
+                                                List.map unId upstreams
+                                        }
+                                    )
+                                    project.processes
+                        }
                 , if updateExisting then
                     Update.andThen
                         (access
@@ -293,9 +287,8 @@ update auth projectId upd =
 
         AddPart processes partId part ->
             Update.all
-                [ Update.map (\_ -> None) <|
-                    Update.modify lens projectDesc <|
-                        \p -> { p | parts = IdMap.insert partId part p.parts }
+                [ Update.modify lens projectDesc <|
+                    \p -> { p | parts = IdMap.insert partId part p.parts }
                 , List.sortBy (Tuple.second >> .order) processes
                     |> List.foldr
                         (\( processId, process ) wupd ->
@@ -309,13 +302,9 @@ update auth projectId upd =
 
         DeletePart partId ->
             Update.all
-                [ Update.map (\_ -> None) <|
-                    Update.modify lens projectDesc <|
-                        \project ->
-                            { project
-                                | parts =
-                                    IdMap.remove partId project.parts
-                            }
+                [ Update.modify lens projectDesc <|
+                    \project ->
+                        { project | parts = IdMap.remove partId project.parts }
                 , Update.andThen
                     (access
                         (o lens <|
@@ -345,19 +334,18 @@ update auth projectId upd =
                     case us of
                         [ user ] ->
                             Update.all
-                                [ Update.map (\_ -> None) <|
-                                    Update.modify lens projectDesc <|
-                                        \p ->
-                                            let
-                                                userRef =
-                                                    User.ref <|
-                                                        Id.self user
-                                            in
-                                            { p
-                                                | members =
-                                                    pushUnique userRef
-                                                        p.members
-                                            }
+                                [ Update.modify lens projectDesc <|
+                                    \p ->
+                                        let
+                                            userRef =
+                                                User.ref <|
+                                                    Id.self user
+                                        in
+                                        { p
+                                            | members =
+                                                pushUnique userRef
+                                                    p.members
+                                        }
                                 , Update.command <|
                                     \_ ->
                                         GDrive.permissions_create auth.token
@@ -373,25 +361,24 @@ update auth projectId upd =
                 )
 
         SetMemberRole role userId ->
-            Update.map (\_ -> None) <|
-                Update.modify lens projectDesc <|
-                    \p ->
-                        let
-                            user =
-                                User.ref userId
-                        in
-                        case role of
-                            Staff ->
-                                { p | admins = List.remove user p.admins }
+            Update.modify lens projectDesc <|
+                \p ->
+                    let
+                        user =
+                            User.ref userId
+                    in
+                    case role of
+                        Staff ->
+                            { p | admins = List.remove user p.admins }
 
-                            Admin ->
-                                { p | admins = pushUnique user p.admins }
+                        Admin ->
+                            { p | admins = pushUnique user p.admins }
 
-                            Owner ->
-                                { p
-                                    | admins = pushUnique user p.admins
-                                    , owner = user
-                                }
+                        Owner ->
+                            { p
+                                | admins = pushUnique user p.admins
+                                , owner = user
+                            }
 
         WorkUpdate ids wupd ->
             List.map

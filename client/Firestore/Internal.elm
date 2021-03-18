@@ -77,6 +77,11 @@ type alias Item =
     Request
 
 
+type Timestamp
+    = Timestamp Int Int
+    | ServerTimestamp
+
+
 type alias Request =
     { get : Bool, set : Bool, value : Maybe Value }
 

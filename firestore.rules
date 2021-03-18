@@ -44,6 +44,12 @@ service cloud.firestore {
       return user() in resource.data.staffs;
     }
 
+    // Activity
+    function isAuthorOfIt() {
+      return user() == resource.data.author;
+    }
+
+
 
     match /clients/{userId} {
       allow read, write: if isUserAuth(userId);
@@ -60,11 +66,17 @@ service cloud.firestore {
       allow update: if isAdminOfIt()
                     && request.resource.data.owner == resource.data.owner;
       allow delete: if isOwnerOfIt();
-    }
-    match /projects/{projectId}/works/{workId} {
-      allow get, list:      if isMemberOf(projectId);
-      allow update:         if isStaffOfIt() || isAdminOf(projectId);
-      allow create, delete: if isAdminOf(projectId);
+
+      match /works/{workId} {
+        allow get, list:      if isMemberOf(projectId);
+        allow update:         if isStaffOfIt() || isAdminOf(projectId);
+        allow create, delete: if isAdminOf(projectId);
+
+        match /activities/{activityId} {
+          allow read, create:   if isMemberOf(projectId);
+          allow update, delete: if isAuthorOfIt() || isAdminOf(projectId);
+        }
+      }
     }
   }
 }

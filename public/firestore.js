@@ -10,7 +10,14 @@ function initialize(app) {
       }
       return array;
     } else if (object.__path) return reference(object.__path);
-    else {
+    else if (object.__timestamp == "server") {
+      return firebase.firestore.FieldValue.serverTimestamp();
+    } else if (object.__timestamp) {
+      return new firebase.firestore.Timestamp(
+        object.seconds,
+        object.nanoseconds
+      );
+    } else {
       let newobj = {};
       for (const [key, value] of Object.entries(object)) {
         newobj[key] = encode(value);

@@ -12,11 +12,16 @@ module Firestore exposing
     , Reference
     , Root
     , SubPort
+    , Timestamp
     , apply
+    , compareTimestamp
+    , fromPosix
     , getId
     , init
     , ref
     , render
+    , serverTimestamp
+    , toPosix
     , update
     , watch
     )
@@ -32,6 +37,7 @@ import Firestore.Update as Update exposing (Updater)
 import Json.Decode as Decode
 import Json.Encode as Encode exposing (Value)
 import Result.Extra exposing (error)
+import Time
 
 
 type Firestore r msg
@@ -102,6 +108,10 @@ type alias CmdPort msg =
     Value -> Cmd msg
 
 
+type alias Timestamp =
+    Internal.Timestamp
+
+
 ref : Path -> Reference s r
 ref =
     Reference
@@ -110,6 +120,50 @@ ref =
 getId : Reference s r -> Id r
 getId (Reference p) =
     Path.getLast p |> Maybe.withDefault (Id "")
+
+
+toPosix : Timestamp -> Maybe Time.Posix
+toPosix t =
+    case t of
+        Timestamp s n ->
+            Just <| Time.millisToPosix <| s * 1000 + n // 1000000
+
+        ServerTimestamp ->
+            Nothing
+
+
+fromPosix : Time.Posix -> Timestamp
+fromPosix t =
+    let
+        m =
+            Time.posixToMillis t
+    in
+    Timestamp (m // 1000) (modBy 1000000 m * 1000000)
+
+
+compareTimestamp : Timestamp -> Timestamp -> Order
+compareTimestamp x y =
+    case ( x, y ) of
+        ( ServerTimestamp, ServerTimestamp ) ->
+            EQ
+
+        ( ServerTimestamp, _ ) ->
+            GT
+
+        ( _, ServerTimestamp ) ->
+            LT
+
+        ( Timestamp sx nx, Timestamp sy ny ) ->
+            if sx == sy then
+                compare nx ny
+
+            else
+                compare sx sy
+
+
+serverTimestamp : Timestamp
+serverTimestamp =
+    ServerTimestamp
 
 
 init : FirestoreDesc r -> Firestore r msg

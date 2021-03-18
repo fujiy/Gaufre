@@ -88,10 +88,8 @@ update auth msg model =
 
         SaveImage image ->
             ( model
-            , Update.map (\_ -> None) <|
-                Update.modify (User.me auth) userDesc <|
-                    \user ->
-                        { user | image = image }
+            , Update.modify (User.me auth) userDesc <|
+                \user -> { user | image = image }
             )
 
         SignOut ->

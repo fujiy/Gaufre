@@ -9,7 +9,9 @@ import Html.Events as Events exposing (stopPropagationOn)
 import Json.Decode as Decode
 import List
 import List.Extra as List
-import Set
+import Time
+import Time.Distance
+import Time.Distance.Types exposing (DistanceId(..), Locale, Tense(..))
 
 
 uncurry : (a -> b -> c) -> ( a, b ) -> c
@@ -25,6 +27,11 @@ flip f b a =
 flip2 : (a -> b -> c -> d) -> b -> c -> a -> d
 flip2 f b c a =
     f a b c
+
+
+flip3 : (a -> b -> c -> d -> e) -> b -> c -> d -> a -> e
+flip3 f b c d a =
+    f a b c d
 
 
 orWith : (a -> a -> a) -> Maybe a -> Maybe a -> Maybe a
@@ -224,3 +231,62 @@ onHide msg =
 onApprove : msg -> Attribute msg
 onApprove msg =
     Events.on "approve" <| Decode.succeed msg
+
+
+timeDistance : Time.Posix -> Time.Posix -> String
+timeDistance =
+    Time.Distance.inWordsWithConfig { withAffix = True } jpLocale
+
+
+jpLocale : Locale
+jpLocale { withAffix } tense distanceId =
+    let
+        toStr =
+            String.fromInt
+
+        maybeAffix str =
+            case ( withAffix, tense ) of
+                ( True, Past ) ->
+                    str ++ "前"
+
+                ( True, Future ) ->
+                    str ++ "後"
+
+                ( False, _ ) ->
+                    str
+    in
+    (case distanceId of
+        LessThanXSeconds i ->
+            toStr i ++ "秒未満"
+
+        HalfAMinute ->
+            "30秒"
+
+        LessThanXMinutes i ->
+            toStr i ++ "分未満"
+
+        XMinutes i ->
+            toStr i ++ "分"
+
+        AboutXHours i ->
+            "約" ++ toStr i ++ "時間"
+
+        XDays i ->
+            toStr i ++ "日"
+
+        AboutXMonths i ->
+            "約" ++ toStr i ++ "ヶ月"
+
+        XMonths i ->
+            toStr i ++ "ヶ月"
+
+        AboutXYears i ->
+            "約" ++ toStr i ++ "年"
+
+        OverXYears i ->
+            toStr i ++ "年以上"
+
+        AlmostXYears i ->
+            "約" ++ toStr i ++ "年"
+    )
+        |> maybeAffix

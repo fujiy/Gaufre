@@ -96,9 +96,9 @@ toMapDoc merger a s =
     s (docRootItem a) |> Array.foldl (merge merger) empty
 
 
-toMapCol : (a -> a -> a) -> a -> Slice (Map a) (Doc a) -> Map a
+toMapCol : (a -> a -> a) -> a -> Slice (Map a) (Col a) -> Map a
 toMapCol merger a s =
-    s (docRootItem a) |> Array.foldl (merge merger) empty
+    s (colRootItem a) |> Array.foldl (merge merger) empty
 
 
 singletonDoc : Path.Path -> Slice (Map a) (Doc a)

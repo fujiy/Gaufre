@@ -31,6 +31,11 @@ type alias Reference =
     Firestore.Reference () User
 
 
+unknown : User
+unknown =
+    { id = "", name = "不明なユーザー", image = "", email = "", profile = "" }
+
+
 
 -- Lenses
 

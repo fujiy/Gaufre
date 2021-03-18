@@ -1,7 +1,5 @@
 port module Main exposing (..)
 
--- import Firestore.Access as Access
-
 import Browser exposing (Document, application)
 import Browser.Navigation as Nav
 import Data exposing (Auth, Data, User)
@@ -12,6 +10,8 @@ import Firestore.Update as Update
 import Html exposing (..)
 import Page
 import Page.Entrance as Entrance
+import Task
+import Time
 import Url exposing (Url)
 
 
@@ -44,6 +44,8 @@ type Model
     = NotSignedIn
         { navKey : Nav.Key
         , url : Url
+        , zone : Time.Zone
+        , now : Time.Posix
         }
     | SignedIn
         { auth : Data.Auth
@@ -56,7 +58,17 @@ type Model
 
 init : () -> Url -> Nav.Key -> ( Model, Cmd Msg )
 init flags origin navKey =
-    ( NotSignedIn { navKey = navKey, url = origin }, Cmd.none )
+    ( NotSignedIn
+        { navKey = navKey
+        , url = origin
+        , zone = Time.utc
+        , now = Time.millisToPosix 0
+        }
+    , Cmd.batch
+        [ Task.perform SetTimeZone Time.here
+        , Task.perform Clock Time.now
+        ]
+    )
 
 
 
@@ -69,6 +81,8 @@ type Msg
     | SignIn
     | SignOut
     | Authorized Auth User
+    | SetTimeZone Time.Zone
+    | Clock Time.Posix
     | Firestore (Firestore.FirestoreSub Data Msg)
     | Page Page.Msg
     | None
@@ -77,7 +91,7 @@ type Msg
 update : Msg -> Model -> ( Model, Cmd Msg )
 update msg model =
     case model of
-        NotSignedIn { navKey, url } ->
+        NotSignedIn m ->
             case msg of
                 SignIn ->
                     ( model, signIn () )
@@ -90,24 +104,31 @@ update msg model =
                                 (Client.init auth user
                                     |> Update.map (\_ -> None)
                                 )
-                                (pageView auth <| Page.init url)
+                                (pageView auth <| Page.init m.url)
                                 (Firestore.init Data.desc)
 
                         page =
-                            Page.init url
+                            Page.init m.url
                     in
                     ( SignedIn
                         { auth = auth
                         , page = page
                         , firestore = firestore
-                        , view = Maybe.withDefault (Document "Gaufre" []) mview
-                        , url = url
+                        , view =
+                            Maybe.withDefault (Document "Gaufre" []) mview
+                        , url = m.url
                         }
                     , Cmd.batch
                         [ cmd
                         , Page.initialize auth page |> Cmd.map Page
                         ]
                     )
+
+                SetTimeZone zone ->
+                    ( NotSignedIn { m | zone = zone }, Cmd.none )
+
+                Clock t ->
+                    ( NotSignedIn { m | now = t }, Cmd.none )
 
                 _ ->
                     ( model, Cmd.none )
@@ -133,7 +154,12 @@ update msg model =
                     )
 
                 SignOut ->
-                    ( NotSignedIn { navKey = r.auth.navKey, url = r.url }
+                    ( NotSignedIn
+                        { navKey = r.auth.navKey
+                        , url = r.url
+                        , zone = r.auth.zone
+                        , now = r.auth.now
+                        }
                     , signOut ()
                     )
 
@@ -154,7 +180,11 @@ update msg model =
 
                 Page Page.SignOut ->
                     ( NotSignedIn
-                        { navKey = r.auth.navKey, url = r.url }
+                        { navKey = r.auth.navKey
+                        , url = r.url
+                        , zone = r.auth.zone
+                        , now = r.auth.now
+                        }
                     , Cmd.batch
                         [ signOut (), Nav.load "/" ]
                     )
@@ -217,6 +247,30 @@ update msg model =
                         ]
                     )
 
+                Clock t ->
+                    let
+                        auth_ =
+                            r.auth
+
+                        auth =
+                            { auth_ | now = t }
+
+                        ( fs, mview, cmd ) =
+                            Firestore.update
+                                firestoreCmdPort
+                                Update.none
+                                (pageView auth r.page)
+                                r.firestore
+                    in
+                    ( SignedIn
+                        { r
+                            | auth = auth
+                            , firestore = fs
+                            , view = Maybe.withDefault r.view mview
+                        }
+                    , cmd
+                    )
+
                 _ ->
                     ( model, Cmd.none )
 
@@ -252,7 +306,7 @@ appView model =
             , body = [ Html.map (always SignIn) Entrance.view ]
             }
 
-        SignedIn { auth, firestore, view, page } ->
+        SignedIn { view } ->
             view
 
 
@@ -274,19 +328,24 @@ subscriptions : Model -> Sub Msg
 subscriptions model =
     case model of
         NotSignedIn m ->
-            authorized <|
-                \{ auth, user } ->
-                    Authorized
-                        { uid = auth.uid
-                        , token = auth.token
-                        , navKey = m.navKey
-                        }
-                        { id = user.id
-                        , name = user.name
-                        , image = user.image
-                        , email = user.email
-                        , profile = ""
-                        }
+            Sub.batch
+                [ authorized <|
+                    \{ auth, user } ->
+                        Authorized
+                            { uid = auth.uid
+                            , token = auth.token
+                            , navKey = m.navKey
+                            , zone = m.zone
+                            , now = m.now
+                            }
+                            { id = user.id
+                            , name = user.name
+                            , image = user.image
+                            , email = user.email
+                            , profile = ""
+                            }
+                , Time.every (60 * 1000) Clock
+                ]
 
         SignedIn s ->
             Sub.batch
@@ -296,6 +355,8 @@ subscriptions model =
                             { uid = auth.uid
                             , token = auth.token
                             , navKey = s.auth.navKey
+                            , zone = s.auth.zone
+                            , now = s.auth.now
                             }
                             { id = user.id
                             , name = user.name
@@ -305,6 +366,7 @@ subscriptions model =
                             }
                 , Firestore.watch firestoreSubPort s.firestore
                     |> Sub.map Firestore
+                , Time.every (60 * 1000) Clock
                 ]
 
 

@@ -3,6 +3,7 @@ module Page.Work exposing (..)
 import Browser.Navigation as Nav
 import Bytes exposing (Bytes)
 import Data exposing (..)
+import Data.Activity as Activity
 import Data.Client as Client
 import Data.Project as Project
 import Data.User as User
@@ -15,10 +16,11 @@ import Firestore.Access as Access exposing (Accessor)
 import Firestore.Lens as Lens exposing (o)
 import Firestore.Path as Path
 import Firestore.Path.Id as Id exposing (Id, unId)
+import Firestore.Path.Id.Map as IdMap
 import Firestore.Remote exposing (Remote(..))
 import Firestore.Update as Update exposing (Updater)
 import GDrive exposing (FileMeta)
-import Html exposing (Html, button, div, img, input, label, node, text)
+import Html exposing (Html, button, div, img, input, label, node, text, textarea)
 import Html.Attributes exposing (accept, attribute, class, hidden, href, placeholder, src, style, type_, value)
 import Html.Events exposing (onClick, onDoubleClick, onInput)
 import List.Extra as List
@@ -39,6 +41,7 @@ type alias Model =
     , loading : Bool
     , downloading : Bool
     , uploading : Bool
+    , comment : String
     , modal : Modal
     }
 
@@ -63,6 +66,7 @@ init workId folderId =
     , loading = True
     , downloading = False
     , uploading = False
+    , comment = ""
     , modal = Hidden
     }
 
@@ -83,6 +87,7 @@ type Msg
     | CreateFolder String
     | Download (List FileMeta)
     | DownloadReady FileMeta Bytes
+    | InputComment String
 
 
 initialize : Auth -> Model -> Cmd Msg
@@ -318,6 +323,9 @@ update auth msg projectId model =
             , Update.command <| \_ -> GDrive.download file bytes
             )
 
+        InputComment comment ->
+            ( { model | comment = comment }, Update.none )
+
         _ ->
             ( model, Update.none )
 
@@ -332,16 +340,17 @@ userRefs =
 
 view : Auth -> Model -> Data -> Project -> Accessor Data (Html Msg)
 view auth model data project =
-    flip2 Access.map2
-        (Access.access
-            (o (Data.project <| Id.self project) <|
-                o (Project.work model.workId) Lens.get
-            )
-            data
-        )
+    let
+        workLens =
+            o (Data.project <| Id.self project) <|
+                Project.work model.workId
+    in
+    flip3 Access.map3
+        (Access.access (o workLens Lens.get) data)
         (Access.access (o (Project.members project) Lens.gets) data)
+        (Access.access (o workLens <| o Work.activities Lens.getAll) data)
     <|
-        \work members ->
+        \work members activities ->
             let
                 editable =
                     Project.myRole project auth
@@ -363,88 +372,90 @@ view auth model data project =
                 status =
                     Work.getStatus work
             in
-            div [ class "ui grid" ]
-                [ div [ class "row" ] []
-                , div [ class "row" ]
-                    [ div [ class "two wide column" ] []
-                    , div [ class "twelve wide column" ]
-                        [ div [ class "ui fluid card" ]
-                            [ div [ class "content" ]
-                                [ fileActions model
-                                , div [ class "header" ] [ text title ]
-                                , div [ class "meta" ]
-                                    [ breadcrumb model work
-                                        |> Html.map MoveToFolder
-                                    ]
-                                , div [ class "description" ]
-                                    [ div [ class "ui horizontal list" ]
-                                        [ div [ class "item" ]
-                                            [ Work.statusLabel status ]
-                                        , div [ class "item" ]
-                                            [ text "担当："
-                                            , User.list editable
-                                                members
-                                                staffs
-                                                []
-                                                |> Html.map
-                                                    (WorkUpdate
-                                                        << Work.SetStaffs
-                                                    )
-                                            ]
-                                        , div [ class "item" ]
-                                            [ text "チェック："
-                                            , User.list editable
-                                                members
-                                                reviewers
-                                                []
-                                                |> Html.map
-                                                    (WorkUpdate
-                                                        << Work.SetReviewers
-                                                    )
-                                            ]
-                                        ]
-                                    ]
+            (\card ->
+                div [ class "ui grid" ]
+                    [ div [ class "row" ] []
+                    , div [ class "row" ]
+                        [ div [ class "two wide column" ] []
+                        , div [ class "twelve wide column" ]
+                            [ div [ class "ui fluid card" ] card ]
+                        , div [ class "two wide column" ] []
+                        ]
+                    , actionModal model
+                    ]
+            )
+                [ div [ class "content" ]
+                    [ fileActions model
+                    , div [ class "header" ] [ text title ]
+                    , div [ class "meta" ]
+                        [ breadcrumb model work |> Html.map MoveToFolder ]
+                    , div [ class "description" ]
+                        [ div [ class "ui horizontal list" ]
+                            [ div [ class "item" ]
+                                [ Work.statusLabel status ]
+                            , div [ class "item" ]
+                                [ text "担当："
+                                , User.list editable members staffs []
+                                    |> Html.map
+                                        (WorkUpdate << Work.SetStaffs)
                                 ]
-                            , div
-                                [ class "content"
-                                , onMouseDownStop ClearSelection
-                                ]
-                                [ div
-                                    [ class "ui link three stackable cards" ]
-                                  <|
-                                    List.map
-                                        (fileCard model)
-                                        folders
-                                , div
-                                    [ class "ui link three stackable cards" ]
-                                  <|
-                                    List.map
-                                        (fileCard model)
-                                        files
-                                , if model.loading then
-                                    div [ class "ui basic segment" ]
-                                        [ div
-                                            [ class <|
-                                                "ui active centered"
-                                                    ++ "iniline loader"
-                                            ]
-                                            []
-                                        ]
-
-                                  else
-                                    when (List.isEmpty model.files) <|
-                                        div [ class "center aligned" ]
-                                            [ text "ファイルを追加する" ]
-                                ]
-                            , div [ class "content" ]
-                                [ div [ class "header" ]
-                                    [ text "履歴" ]
+                            , div [ class "item" ]
+                                [ text "チェック："
+                                , User.list editable members reviewers []
+                                    |> Html.map
+                                        (WorkUpdate << Work.SetReviewers)
                                 ]
                             ]
                         ]
-                    , div [ class "two wide column" ] []
                     ]
-                , actionModal model
+                , div
+                    [ class "content"
+                    , onMouseDownStop ClearSelection
+                    ]
+                    [ div [ class "ui link three stackable cards" ] <|
+                        List.map (fileCard model) folders
+                    , div [ class "ui link three stackable cards" ] <|
+                        List.map (fileCard model) files
+                    , if model.loading then
+                        div [ class "ui basic segment" ]
+                            [ div
+                                [ class "ui active centered iniline loader" ]
+                                []
+                            ]
+
+                      else
+                        when (List.isEmpty model.files) <|
+                            div [ class "center aligned" ]
+                                [ text "ファイルを追加する" ]
+                    ]
+                , div [ class "content" ]
+                    [ div [ class "header" ] [ text "アクティビティ" ]
+                    , Activity.list auth (IdMap.fromListSelf members) activities
+                    , div [ class "ui reply form" ]
+                        [ div [ class "field" ]
+                            [ textarea [ onInput InputComment ] [] ]
+                        , button
+                            [ class "ui blue labeled icon button"
+                            , classIf (model.comment == "") "disabled"
+                            , onClick <|
+                                WorkUpdate <|
+                                    Work.AddComment Nothing model.comment
+                            ]
+                            [ icon "comment", text "コメント" ]
+                        , when (Work.isWorking (myId auth) work) <|
+                            div
+                                [ class "ui green labeled icon button" ]
+                                [ icon "paper plane", text "提出" ]
+                        , when (Work.isReviewing (myId auth) work) <|
+                            div
+                                [ class "ui green labeled icon button" ]
+                                [ icon "check", text "OK" ]
+                        , when (Work.isReviewing (myId auth) work) <|
+                            div
+                                [ class "ui red labeled icon button" ]
+                                [ icon "times", text "リテイク" ]
+                        ]
+                    ]
                 ]
 
 

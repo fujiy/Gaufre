@@ -1,8 +1,8 @@
 module Data.Work exposing (..)
 
 import Data exposing (..)
+import Data.Activity as Activity
 import Data.User as User
-import Dict
 import Firestore exposing (..)
 import Firestore.Access as Access exposing (access)
 import Firestore.Desc as Desc
@@ -30,15 +30,15 @@ type Status
 
 
 type alias Reference =
-    Firestore.Reference () Work
+    Firestore.Reference WorkSub Work
 
 
 type alias Collection =
-    Firestore.Collection () Work
+    Firestore.Collection WorkSub Work
 
 
 type alias Document =
-    Firestore.Document () Work
+    Firestore.Document WorkSub Work
 
 
 getWorkProcess : Project -> Work -> Process
@@ -76,6 +76,16 @@ isMember id work =
             User.ref id
     in
     List.member user work.staffs || List.member user work.reviewers
+
+
+isWorking : Id User -> Work -> Bool
+isWorking id work =
+    List.member (User.ref id) work.working
+
+
+isReviewing : Id User -> Work -> Bool
+isReviewing id work =
+    List.member (User.ref id) work.reviewing
 
 
 relativeLink : Project -> Work -> String
@@ -463,6 +473,11 @@ selectionTitle project works selection =
 -- Lenses
 
 
+activities : Lens Doc Document Col Activity.Collection
+activities =
+    Lens.subCollection .activities (\b a -> { a | activities = b })
+
+
 ref : Id Project -> Id Work -> Reference
 ref pid id =
     Firestore.ref <| Path.fromIds [ "projects", unId pid, "works", unId id ]
@@ -493,31 +508,31 @@ downstreamOf id =
     where_ "upstreams" CONTAINS Desc.id id
 
 
-isWorking : Id User -> Lens Col Collection Col Collection
-isWorking id =
+userIsWorking : Id User -> Lens Col Collection Col Collection
+userIsWorking id =
     where_ "working" CONTAINS Desc.reference (User.ref id)
 
 
-isReviewing : Id User -> Lens Col Collection Col Collection
-isReviewing id =
+userIsReviewing : Id User -> Lens Col Collection Col Collection
+userIsReviewing id =
     where_ "reviewing" CONTAINS Desc.reference (User.ref id)
 
 
-isWaitingUpstream : Id User -> Lens Col Collection Col Collection
-isWaitingUpstream id =
+userIsWaitingUpstream : Id User -> Lens Col Collection Col Collection
+userIsWaitingUpstream id =
     o
         (where_ "staffs" CONTAINS Desc.reference (User.ref id))
         (where_ "waitingFor" Lens.NE (Desc.list Desc.string) [])
 
 
-isWaitingSubmit : Id User -> Lens Col Collection Col Collection
-isWaitingSubmit id =
+userIsWaitingSubmit : Id User -> Lens Col Collection Col Collection
+userIsWaitingSubmit id =
     o (where_ "reviewers" CONTAINS Desc.reference (User.ref id)) <|
         whereNotEmpty "working"
 
 
-isWaitingReview : Id User -> Lens Col Collection Col Collection
-isWaitingReview id =
+userIsWaitingReview : Id User -> Lens Col Collection Col Collection
+userIsWaitingReview id =
     o (where_ "staffs" CONTAINS Desc.reference (User.ref id)) <|
         whereNotEmpty "reviewing"
 
@@ -551,6 +566,7 @@ type Update
     | SetUpstreams (List (Id Work))
     | SetUpstreamProcesses (List (Id Process))
     | Delete
+    | AddComment (Maybe (Id Activity)) String
     | OtherWork (Id Work) Update
     | AndThen Update Update
     | None
@@ -580,7 +596,11 @@ update auth projectId workId worksLens upd =
                     WorkRef <|
                         Firestore.ref <|
                             Path.fromIds
-                                [ "projects", unId projectId, "works", unId id ]
+                                [ "projects"
+                                , unId projectId
+                                , "works"
+                                , unId id
+                                ]
     in
     case upd of
         Add processId process partId name ->
@@ -609,11 +629,15 @@ update auth projectId workId worksLens upd =
                                 ws
 
                         waitingFor =
-                            List.filter (getStatus >> (/=) Complete) upstreams
+                            List.filter (getStatus >> (/=) Complete)
+                                upstreams
                     in
                     Update.map (\_ -> None) <|
                         Update.default
-                            (o worksLens <| Lens.doc <| Id.fromString folder.id)
+                            (o worksLens <|
+                                Lens.doc <|
+                                    Id.fromString folder.id
+                            )
                             workDesc
                         <|
                             { id = folder.id
@@ -623,10 +647,12 @@ update auth projectId workId worksLens upd =
                             , staffs = []
                             , reviewers = []
                             , upstreams =
-                                List.map (Id.self >> ref projectId >> WorkRef)
+                                List.map
+                                    (Id.self >> ref projectId >> WorkRef)
                                     upstreams
                             , waitingFor =
-                                List.map (Id.self >> ref projectId >> WorkRef)
+                                List.map
+                                    (Id.self >> ref projectId >> WorkRef)
                                     waitingFor
                             , working = []
                             , reviewing = []
@@ -634,96 +660,95 @@ update auth projectId workId worksLens upd =
                 )
 
         SetStaffs users ->
-            Update.map (\_ -> None) <|
-                Update.modify lens workDesc <|
-                    \work ->
-                        let
-                            staffs =
-                                userRefs users
+            Update.modify lens workDesc <|
+                \work ->
+                    let
+                        staffs =
+                            userRefs users
 
-                            addition =
-                                diff staffs work.staffs
+                        addition =
+                            diff staffs work.staffs
 
-                            deletion =
-                                diff work.staffs staffs
+                        deletion =
+                            diff work.staffs staffs
 
-                            working =
-                                if
-                                    List.member (getStatus work)
-                                        [ NotAssigned, Working ]
-                                then
-                                    diff work.working deletion ++ addition
+                        working =
+                            if
+                                List.member (getStatus work)
+                                    [ NotAssigned, Working ]
+                            then
+                                diff work.working deletion ++ addition
 
-                                else
-                                    work.working
-                        in
-                        { work | staffs = staffs, working = working }
+                            else
+                                work.working
+                    in
+                    { work | staffs = staffs, working = working }
 
         SetReviewers users ->
-            Update.map (\_ -> None) <|
-                Update.modify lens workDesc <|
-                    \work ->
-                        let
-                            reviewers =
-                                userRefs users
+            Update.modify lens workDesc <|
+                \work ->
+                    let
+                        reviewers =
+                            userRefs users
 
-                            addition =
-                                diff reviewers work.reviewers
+                        addition =
+                            diff reviewers work.reviewers
 
-                            deletion =
-                                diff work.reviewers reviewers
+                        deletion =
+                            diff work.reviewers reviewers
 
-                            reviewing =
-                                if getStatus work == Reviewing then
-                                    diff work.reviewing deletion ++ addition
+                        reviewing =
+                            if getStatus work == Reviewing then
+                                diff work.reviewing deletion ++ addition
 
-                                else
-                                    work.reviewing
-                        in
-                        { work | reviewers = reviewers, reviewing = reviewing }
+                            else
+                                work.reviewing
+                    in
+                    { work
+                        | reviewers = reviewers
+                        , reviewing = reviewing
+                    }
 
         SetBelongsTo parts ->
-            Update.map (\_ -> None) <|
-                Update.modify lens workDesc <|
-                    \work -> { work | belongsTo = parts }
+            Update.modify lens workDesc <|
+                \work -> { work | belongsTo = parts }
 
         SetUpstreams works ->
-            Update.map (\_ -> None) <|
-                Update.modify lens workDesc <|
-                    \work ->
+            Update.modify lens workDesc <|
+                \work ->
+                    let
+                        upstreams =
+                            workRefs works
+
+                        addition =
+                            diff upstreams work.upstreams
+
+                        deletion =
+                            diff work.upstreams upstreams
+                    in
+                    if
+                        List.member (getStatus work)
+                            [ NotAssigned, Waiting ]
+                    then
                         let
-                            upstreams =
-                                workRefs works
+                            waitingFor =
+                                diff work.waitingFor deletion ++ addition
 
-                            addition =
-                                diff upstreams work.upstreams
+                            working =
+                                if List.isEmpty waitingFor then
+                                    []
 
-                            deletion =
-                                diff work.upstreams upstreams
+                                else
+                                    work.staffs
                         in
-                        if
-                            List.member (getStatus work)
-                                [ NotAssigned, Waiting ]
-                        then
-                            let
-                                waitingFor =
-                                    diff work.waitingFor deletion ++ addition
+                        { work
+                            | upstreams = upstreams
+                            , waitingFor = waitingFor
+                            , working = working
+                        }
 
-                                working =
-                                    if List.isEmpty waitingFor then
-                                        []
-
-                                    else
-                                        work.staffs
-                            in
-                            { work
-                                | upstreams = upstreams
-                                , waitingFor = waitingFor
-                                , working = working
-                            }
-
-                        else
-                            { work | upstreams = upstreams }
+                    else
+                        { work | upstreams = upstreams }
 
         SetUpstreamProcesses processes ->
             Update.andThen
@@ -731,7 +756,10 @@ update auth projectId workId worksLens upd =
                     Access.andThen
                         (\work ->
                             access
-                                (o worksLens <| o (samePartAs work) Lens.getAll)
+                                (o worksLens <|
+                                    o (samePartAs work)
+                                        Lens.getAll
+                                )
                                 data
                         )
                         (access
@@ -770,6 +798,21 @@ update auth projectId workId worksLens upd =
                             { gdriveUpdate | trashed = Just True }
                             |> Cmd.map (\_ -> None)
                 ]
+
+        AddComment replyTo comment ->
+            Update.add (o lens activities) activityDesc <|
+                \id ->
+                    { id = id
+                    , type_ = Comment
+                    , createdAt = serverTimestamp
+                    , text = comment
+                    , author = myRef auth
+                    , replyTo =
+                        Maybe.map (Activity.ref projectId workId >> ActivityRef)
+                            replyTo
+                    , reject = False
+                    , mentionTo = []
+                    }
 
         OtherWork workId_ upd_ ->
             update auth projectId workId_ worksLens upd_

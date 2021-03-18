@@ -2,10 +2,13 @@ module Firestore.Update exposing (..)
 
 import Array exposing (Array)
 import Array.Extra as Array
-import Browser.Navigation exposing (load)
-import Firestore.Access as Access exposing (Accessor)
+import Dict
+import Firestore.Access as Access
 import Firestore.Desc exposing (DocumentDesc(..))
 import Firestore.Internal as Internal exposing (..)
+import Firestore.Path as Path
+import Firestore.Path.Id as Id exposing (SelfId)
+import Firestore.Path.Id.Map as IdMap
 import Firestore.Path.Map as PathMap
 import Firestore.Path.Map.Slice as Slice
 import Firestore.Remote as Remote exposing (Remote(..))
@@ -164,8 +167,84 @@ alter :
     Lens Root a Doc (Document s r)
     -> DocumentDesc s r
     -> (Maybe r -> Alter r)
-    -> Updater a (Maybe r)
+    -> Updater a msg
 alter (Lens l) (DocumentDesc d) f =
+    let
+        updater _ =
+            Updater <|
+                \a ->
+                    let
+                        (Accessor paths rd) =
+                            l.access a
+
+                        s =
+                            Remote.toMaybe rd
+                                |> Maybe.unwrap d.empty
+                                    (\(Document s_ _) -> s_)
+
+                        update mr =
+                            let
+                                ( newR, mu, new ) =
+                                    case f mr of
+                                        Update r ->
+                                            ( Committing r
+                                            , Just <|
+                                                setRequest <|
+                                                    d.encoder <|
+                                                        Committing r
+                                            , Just r
+                                            )
+
+                                        NoChange ->
+                                            ( Remote.fromMaybe mr
+                                            , Nothing
+                                            , mr
+                                            )
+
+                                        Delete ->
+                                            ( Failure
+                                            , Just deleteRequest
+                                            , Nothing
+                                            )
+                            in
+                            case mu of
+                                Just u ->
+                                    l.update u (Document s newR)
+                                        |> fromDoc
+                                        |> flip runUpdater a
+
+                                Nothing ->
+                                    noUpdates_ a
+                    in
+                    case
+                        Remote.andThen (\(Document _ rr) -> rr) rd
+                    of
+                        Loading ->
+                            { value = a
+                            , requests =
+                                Slice.toMapDoc mergeRequest getRequest paths
+                            , command = Cmd.none
+                            , afterwards = updater ()
+                            }
+
+                        Failure ->
+                            update Nothing
+
+                        UpToDate r ->
+                            update <| Just r
+
+                        Committing r ->
+                            update <| Just r
+    in
+    updater ()
+
+
+alter_ :
+    Lens Root a Doc (Document s r)
+    -> DocumentDesc s r
+    -> (Maybe r -> Alter r)
+    -> Updater a (Maybe r)
+alter_ (Lens l) (DocumentDesc d) f =
     let
         updater _ =
             Updater <|
@@ -241,9 +320,30 @@ modify :
     Lens Root a Doc (Document s r)
     -> DocumentDesc s r
     -> (r -> r)
-    -> Updater a (Maybe r)
+    -> Updater a msg
 modify l d f =
     alter l d <|
+        Maybe.unwrap NoChange
+            (\r ->
+                let
+                    new =
+                        f r
+                in
+                if new == r then
+                    NoChange
+
+                else
+                    Update new
+            )
+
+
+modify_ :
+    Lens Root a Doc (Document s r)
+    -> DocumentDesc s r
+    -> (r -> r)
+    -> Updater a (Maybe r)
+modify_ l d f =
+    alter_ l d <|
         Maybe.unwrap NoChange
             (\r ->
                 let
@@ -262,10 +362,56 @@ default :
     Lens Root a Doc (Document s r)
     -> DocumentDesc s r
     -> r
-    -> Updater a r
+    -> Updater a msg
 default l d r =
     alter l d (Maybe.unwrap (Update r) (always NoChange))
-        |> map (Maybe.withDefault r)
+
+
+add :
+    Lens Root a Col (Collection s r)
+    -> DocumentDesc s r
+    -> (SelfId -> r)
+    -> Updater a msg
+add (Lens l) (DocumentDesc d) r =
+    Updater <|
+        \a ->
+            let
+                (Accessor path rcol) =
+                    l.access a
+
+                col =
+                    Remote.withDefault
+                        (Collection
+                            { name =
+                                Slice.toMapCol mergeRequest getRequest path
+                                    |> PathMap.toList
+                                    |> List.head
+                                    |> Maybe.map Tuple.first
+                                    |> Maybe.andThen Path.getLast
+                                    |> Maybe.withDefault Id.null
+                            , empty = d.empty
+                            , loading = True
+                            , docs = IdMap.empty
+                            , q = Dict.empty
+                            }
+                        )
+                        rcol
+
+                (Internal.Updater f) =
+                    l.update (setRequest <| d.encoder rd) col
+
+                upd =
+                    f a
+
+                rd =
+                    Committing <| r <| Id.unId Id.null
+            in
+            { value = upd.value
+            , requests =
+                Slice.toMapCol mergeRequest noRequest upd.requests
+            , command = Cmd.none
+            , afterwards = none
+            }
 
 
 both : Updater a msg -> Updater a msg -> Updater a msg

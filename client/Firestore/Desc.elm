@@ -13,6 +13,7 @@ import Json.Encode as Encode exposing (Value)
 import List.Extra as List
 import Maybe.Extra as Maybe
 import Monocle.Iso exposing (Iso)
+import Time
 import Util exposing (..)
 
 
@@ -302,6 +303,28 @@ reference =
 references : Desc (List (Reference s r))
 references =
     list reference
+
+
+timestamp : Desc Timestamp
+timestamp =
+    Desc
+        (\t ->
+            case t of
+                Timestamp s n ->
+                    Encode.object
+                        [ ( "__timestamp", Encode.bool True )
+                        , ( "seconds", Encode.int s )
+                        , ( "nanoseconds", Encode.int n )
+                        ]
+
+                ServerTimestamp ->
+                    Encode.object
+                        [ ( "__timestamp", Encode.string "server" ) ]
+        )
+        (Decode.map2 Timestamp
+            (Decode.field "seconds" Decode.int)
+            (Decode.field "nanoseconds" Decode.int)
+        )
 
 
 remote : Desc a -> Desc (Remote a)
