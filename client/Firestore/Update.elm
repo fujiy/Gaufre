@@ -184,7 +184,7 @@ alter (Lens l) (DocumentDesc d) f =
 
                         update mr =
                             let
-                                ( newR, mu, new ) =
+                                ( newR, mu ) =
                                     case f mr of
                                         Update r ->
                                             ( Committing r
@@ -192,19 +192,16 @@ alter (Lens l) (DocumentDesc d) f =
                                                 setRequest <|
                                                     d.encoder <|
                                                         Committing r
-                                            , Just r
                                             )
 
                                         NoChange ->
                                             ( Remote.fromMaybe mr
                                             , Nothing
-                                            , mr
                                             )
 
                                         Delete ->
                                             ( Failure
                                             , Just deleteRequest
-                                            , Nothing
                                             )
                             in
                             case mu of
@@ -216,9 +213,7 @@ alter (Lens l) (DocumentDesc d) f =
                                 Nothing ->
                                     noUpdates_ a
                     in
-                    case
-                        Remote.andThen (\(Document _ rr) -> rr) rd
-                    of
+                    case Remote.andThen (\(Document _ rr) -> rr) rd of
                         Loading ->
                             { value = a
                             , requests =

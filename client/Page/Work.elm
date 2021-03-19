@@ -21,12 +21,13 @@ import Firestore.Remote exposing (Remote(..))
 import Firestore.Update as Update exposing (Updater)
 import GDrive exposing (FileMeta)
 import Html exposing (Html, button, div, img, input, label, node, text, textarea)
-import Html.Attributes exposing (accept, attribute, class, hidden, href, placeholder, src, style, type_, value)
+import Html.Attributes as Attr exposing (accept, attribute, class, hidden, href, placeholder, src, style, type_, value)
 import Html.Events exposing (onClick, onDoubleClick, onInput)
 import List.Extra as List
 import Maybe.Extra as Maybe
 import Result.Extra as Result
 import Set exposing (Set)
+import String.Extra as String
 import Url.Builder as Url
 import Util exposing (..)
 
@@ -430,21 +431,35 @@ view auth model data project =
                     ]
                 , div [ class "content" ]
                     [ div [ class "header" ] [ text "アクティビティ" ]
-                    , Activity.list auth (IdMap.fromListSelf members) activities
+                    , Work.activityTree auth
+                        (IdMap.fromListSelf members)
+                        activities
+                        |> Html.map WorkUpdate
                     , div [ class "ui reply form" ]
                         [ div [ class "field" ]
-                            [ textarea [ onInput InputComment ] [] ]
+                            [ textarea
+                                [ Attr.rows 3
+                                , Attr.placeholder "コメント"
+                                , onInput InputComment
+                                ]
+                                []
+                            ]
                         , button
                             [ class "ui blue labeled icon button"
-                            , classIf (model.comment == "") "disabled"
+                            , classIf (String.isBlank model.comment) "disabled"
                             , onClick <|
                                 WorkUpdate <|
-                                    Work.AddComment Nothing model.comment
+                                    Work.ActivityUpdate Id.null <|
+                                        Activity.AddComment model.comment
                             ]
                             [ icon "comment", text "コメント" ]
                         , when (Work.isWorking (myId auth) work) <|
-                            div
-                                [ class "ui green labeled icon button" ]
+                            button
+                                [ class "ui green labeled icon button"
+                                , onClick <|
+                                    WorkUpdate <|
+                                        Work.Submit model.comment
+                                ]
                                 [ icon "paper plane", text "提出" ]
                         , when (Work.isReviewing (myId auth) work) <|
                             div

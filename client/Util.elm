@@ -238,6 +238,15 @@ timeDistance =
     Time.Distance.inWordsWithConfig { withAffix = True } jpLocale
 
 
+timeAgo : Time.Posix -> Time.Posix -> String
+timeAgo x y =
+    if Time.posixToMillis x >= Time.posixToMillis y then
+        "たった今"
+
+    else
+        Time.Distance.inWordsWithConfig { withAffix = True } jpLocale x y
+
+
 jpLocale : Locale
 jpLocale { withAffix } tense distanceId =
     let

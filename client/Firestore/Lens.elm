@@ -252,11 +252,7 @@ doc id =
                     \(Collection col) ->
                         { value =
                             Collection
-                                { col
-                                    | docs =
-                                        IdMap.insert id d col.docs
-                                    , loading = False
-                                }
+                                { col | docs = IdMap.insert id d col.docs }
                         , requests =
                             Slice.addDoc (Slice.doc id) (PathMap.docRootItem u)
                         , afterwards = noUpdater
@@ -356,10 +352,7 @@ where_ field qop desc a =
                     \(Collection col) ->
                         { value =
                             Collection
-                                { col
-                                    | q = Dict.insert key qc col.q
-                                    , loading = False
-                                }
+                                { col | q = Dict.insert key qc col.q }
                         , requests =
                             Slice.addCol
                                 (Slice.query field op value)
@@ -390,7 +383,7 @@ getAllRemote =
                             IdMap.items col.docs
                                 |> List.map (\(Document _ r) -> r)
                      in
-                     if col.loading then
+                     if col.loading && List.isEmpty ds then
                         Loading
 
                      else
@@ -419,7 +412,7 @@ getAll =
                                 |> List.filterMap
                                     (\(Document _ r) -> Remote.toMaybe r)
                      in
-                     if col.loading then
+                     if col.loading && List.isEmpty ds then
                         Loading
 
                      else

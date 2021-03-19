@@ -213,15 +213,13 @@ collection name getter (DocumentDesc d) (CollectionDesc c) =
                                     , q = Dict.empty
                                 }
 
+                    Just (Got _) ->
+                        Ok <| Collection { col | loading = False }
+
                     _ ->
                         Result.map2
                             (\docs q ->
-                                Collection
-                                    { col
-                                        | docs = docs
-                                        , q = q
-                                        , loading = False
-                                    }
+                                Collection { col | docs = docs, q = q }
                             )
                             (List.foldr
                                 (\( did, dpv ) rd ->

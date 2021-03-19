@@ -117,7 +117,7 @@ type ActivityRef
 
 type ActivityType
     = Comment
-    | Submit
+    | Submission
     | Review
 
 
@@ -211,7 +211,7 @@ activityDesc =
             .type_
             (Desc.enum
                 [ ( "comment", Comment )
-                , ( "submit", Submit )
+                , ( "submission", Submission )
                 , ( "review", Review )
                 ]
             )

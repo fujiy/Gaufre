@@ -364,7 +364,7 @@ workCell auth model partIds process partId part work =
             td
                 [ class "center aligned selectable"
                 , classIf selected "active"
-                , classIf (status == Work.Complete) "positive"
+                , classIf (status == Work.Completed) "positive"
                 , style "cursor" "pointer"
                 , rowspan n
                 , onMouseDownStop <|

@@ -8,8 +8,9 @@ import Firestore.Path.Id as Id exposing (Id, unId)
 import Firestore.Path.Id.Map as IdMap
 import Html exposing (Html, div, img, pre, span, text)
 import Html.Attributes exposing (class, src)
+import Html.Events exposing (onClick)
 import Tree exposing (Tree)
-import Util exposing (flip, timeDistance)
+import Util exposing (flip, timeAgo, timeDistance, when)
 
 
 type alias Collection =
@@ -24,6 +25,12 @@ type alias Reference =
     Firestore.Reference () Activity
 
 
+type Update
+    = AddComment String
+    | DeleteComment
+    | CancelSubmission
+
+
 ref : Id Project -> Id Work -> Id Activity -> Reference
 ref pid wid id =
     Firestore.ref <|
@@ -31,15 +38,14 @@ ref pid wid id =
             [ "projects", unId pid, "works", unId wid, "activities", unId id ]
 
 
-list : Auth -> IdMap.Map User User -> List Activity -> Html msg
-list auth users =
-    tree auth users << replyTree
-
-
-tree : Auth -> IdMap.Map User User -> List (Tree Activity) -> Html msg
+tree :
+    Auth
+    -> IdMap.Map User User
+    -> List (Tree Activity)
+    -> Html ( Id Activity, Update )
 tree auth users activities =
-    div [ class "ui comments" ] <|
-        List.map (item auth users) <|
+    let
+        xs =
             List.sortWith
                 (\x y ->
                     compareTimestamp
@@ -47,9 +53,16 @@ tree auth users activities =
                         (Tree.label y |> .createdAt)
                 )
                 activities
+    in
+    div [ class "ui comments" ] <|
+        List.map (item auth users) xs
 
 
-item : Auth -> IdMap.Map User User -> Tree Activity -> Html msg
+item :
+    Auth
+    -> IdMap.Map User User
+    -> Tree Activity
+    -> Html ( Id Activity, Update )
 item auth users t =
     let
         a =
@@ -59,9 +72,12 @@ item auth users t =
             IdMap.get (Firestore.getId a.author) users
                 |> Maybe.withDefault User.unknown
 
-        time =
+        isMine =
+            Firestore.getId a.author == myId auth
+
+        date =
             Firestore.toPosix a.createdAt
-                |> Maybe.map (flip timeDistance auth.now)
+                |> Maybe.map (flip timeAgo auth.now)
                 |> Maybe.withDefault ""
     in
     div [ class "comment" ]
@@ -74,7 +90,7 @@ item auth users t =
                         Comment ->
                             text ""
 
-                        Submit ->
+                        Submission ->
                             text "提出しました"
 
                         Review ->
@@ -87,9 +103,25 @@ item auth users t =
                                     text "OK"
                                 ]
                     ]
-                , div [ class "date" ] [ text time ]
+                , div [ class "date" ] [ text date ]
                 ]
             , pre [ class "text" ] [ text a.text ]
+            , div [ class "actions" ]
+                [ Html.a [] [ text "返信" ]
+                , when isMine <|
+                    case a.type_ of
+                        Comment ->
+                            Html.a [ onClick ( Id.self a, DeleteComment ) ]
+                                [ text "削除" ]
+
+                        Submission ->
+                            Html.a [ onClick ( Id.self a, CancelSubmission ) ]
+                                [ text "取り消す" ]
+
+                        Review ->
+                            Html.a [ onClick ( Id.self a, DeleteComment ) ]
+                                [ text "" ]
+                ]
             ]
         , tree auth users <| Tree.children t
         ]
