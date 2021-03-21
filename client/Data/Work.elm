@@ -88,6 +88,15 @@ isReviewing id work =
     List.member (User.ref id) work.reviewing
 
 
+isTheirTask : Id User -> Work -> Bool
+isTheirTask id work =
+    if getStatus work == Completed then
+        isMember id work
+
+    else
+        isWorking id work || isReviewing id work
+
+
 relativeLink : Project -> Work -> String
 relativeLink project work =
     let
@@ -203,7 +212,7 @@ statusColor status =
             "blue"
 
         Reviewing ->
-            "orange"
+            "yellow"
 
         Completed ->
             "green"
@@ -248,19 +257,44 @@ workLabel project work =
         [ icon <| iconClass status, text <| title project work ]
 
 
-waitingStatuses :
+infoLabels :
     Project
+    -> IdMap.Map User User
     -> IdMap.Map Work Work
     -> Work
     -> Html Work
-waitingStatuses project works work =
-    div [ class "ui horizontal list" ] <|
-        flip List.filterMap work.waitingFor <|
-            \(WorkRef r) ->
-                flip Maybe.map (IdMap.get (getId r) works) <|
-                    \waiting ->
-                        div [ class "item" ]
-                            [ workLabel project waiting ]
+infoLabels project members works work =
+    let
+        status =
+            getStatus work
+    in
+    div [ class "ui labels" ] <|
+        statusLabel status
+            :: (case status of
+                    NotAssigned ->
+                        []
+
+                    Waiting ->
+                        flip List.filterMap work.waitingFor <|
+                            \(WorkRef r) ->
+                                IdMap.get (getId r) works
+                                    |> Maybe.map (workLabel project)
+
+                    Working ->
+                        flip List.filterMap work.working <|
+                            \r ->
+                                IdMap.get (getId r) members
+                                    |> Maybe.map User.label_
+
+                    Reviewing ->
+                        flip List.filterMap work.reviewing <|
+                            \r ->
+                                IdMap.get (getId r) members
+                                    |> Maybe.map User.label_
+
+                    Completed ->
+                        []
+               )
 
 
 statusNumber : Status -> Int
@@ -410,9 +444,14 @@ partList parts work =
 -- Activities
 
 
-activityTree : Auth -> IdMap.Map User User -> List Activity -> Html Update
-activityTree auth users xs =
-    Activity.tree auth users (Activity.replyTree xs)
+activityTree :
+    Auth
+    -> IdMap.Map User User
+    -> Work
+    -> List Activity
+    -> Html Update
+activityTree auth users work xs =
+    Activity.tree auth users True (Activity.replyTree xs)
         |> Html.map (uncurry ActivityUpdate)
 
 
@@ -588,8 +627,11 @@ type Update
     | Delete
     | ActivityUpdate (Id Activity) Activity.Update
     | Complete
+    | CancelComplete
     | UpstreamCompleted (Id Work)
     | Submit String
+    | Accept String
+    | Reject String
     | OtherWork (Id Work) Update
     | AndThen Update Update
     | None
@@ -806,61 +848,6 @@ update auth projectId workId worksLens upd =
                             |> Cmd.map (\_ -> None)
                 ]
 
-        ActivityUpdate replyTo (Activity.AddComment comment) ->
-            Update.add (o lens activities) activityDesc <|
-                \id ->
-                    { id = id
-                    , type_ = Comment
-                    , createdAt = serverTimestamp
-                    , text = comment
-                    , author = myRef auth
-                    , replyTo =
-                        if replyTo == Id.null then
-                            Nothing
-
-                        else
-                            Just <|
-                                ActivityRef <|
-                                    Activity.ref projectId workId replyTo
-                    , reject = False
-                    , mentionTo = []
-                    }
-
-        ActivityUpdate id Activity.DeleteComment ->
-            Update.delete (o lens <| activity id) activityDesc
-
-        ActivityUpdate id Activity.CancelSubmission ->
-            Update.all
-                [ Update.delete (o lens <| activity id) activityDesc
-                , Update.modify lens workDesc <|
-                    \work ->
-                        { work | working = work.staffs, reviewing = [] }
-                , Update.andThen
-                    (access
-                        (o worksLens <|
-                            o (downstreamOf projectId workId) Lens.getAll
-                        )
-                    )
-                    (flip Update.for <|
-                        \work ->
-                            Update.modify
-                                (o worksLens <| Lens.doc (Id.self work))
-                                workDesc
-                            <|
-                                \w ->
-                                    { w
-                                        | waitingFor =
-                                            pushUnique
-                                                (ref projectId workId
-                                                    |> WorkRef
-                                                )
-                                                w.waitingFor
-                                        , working = []
-                                        , reviewing = []
-                                    }
-                    )
-                ]
-
         Submit comment ->
             Update.all
                 [ Update.modify lens workDesc <|
@@ -883,7 +870,54 @@ update auth projectId workId worksLens upd =
                         , text = comment
                         , author = myRef auth
                         , replyTo = Nothing
-                        , reject = False
+                        , mentionTo = []
+                        }
+                ]
+
+        Accept comment ->
+            Update.all
+                [ Update.modify lens workDesc <|
+                    \work ->
+                        { work
+                            | reviewing =
+                                List.remove (myRef auth) work.reviewing
+                        }
+                , Update.andThen
+                    (access <| o lens Lens.get)
+                  <|
+                    \work ->
+                        if
+                            List.remove (myRef auth) work.reviewing
+                                |> List.isEmpty
+                        then
+                            Update.succeed Complete
+
+                        else
+                            Update.none
+                , Update.add (o lens activities) activityDesc <|
+                    \id ->
+                        { id = id
+                        , type_ = Acception
+                        , createdAt = serverTimestamp
+                        , text = comment
+                        , author = myRef auth
+                        , replyTo = Nothing
+                        , mentionTo = []
+                        }
+                ]
+
+        Reject comment ->
+            Update.all
+                [ Update.modify lens workDesc <|
+                    \work -> { work | working = work.staffs, reviewing = [] }
+                , Update.add (o lens activities) activityDesc <|
+                    \id ->
+                        { id = id
+                        , type_ = Rejection
+                        , createdAt = serverTimestamp
+                        , text = comment
+                        , author = myRef auth
+                        , replyTo = Nothing
                         , mentionTo = []
                         }
                 ]
@@ -902,18 +936,39 @@ update auth projectId workId worksLens upd =
                                 UpstreamCompleted workId
                 )
 
+        CancelComplete ->
+            Update.andThen
+                (access
+                    (o worksLens <|
+                        o (downstreamOf projectId workId) Lens.getAll
+                    )
+                )
+                (flip Update.for <|
+                    \work ->
+                        Update.modify
+                            (o worksLens <| Lens.doc (Id.self work))
+                            workDesc
+                        <|
+                            \w ->
+                                { w
+                                    | waitingFor =
+                                        pushUnique
+                                            (ref projectId workId
+                                                |> WorkRef
+                                            )
+                                            w.waitingFor
+                                    , working = []
+                                    , reviewing = []
+                                }
+                )
+
         UpstreamCompleted upstream ->
-            let
-                _ =
-                    Debug.log "UPS" ( upstream, workId )
-            in
             Update.modify lens workDesc <|
                 \work ->
                     let
                         waitingFor =
-                            Debug.log "REMOVE" <|
-                                List.remove (Debug.log "REF" <| WorkRef <| ref projectId upstream)
-                                    work.waitingFor
+                            List.remove (WorkRef <| ref projectId upstream)
+                                work.waitingFor
 
                         working =
                             if List.isEmpty waitingFor then
@@ -923,6 +978,54 @@ update auth projectId workId worksLens upd =
                                 work.working
                     in
                     { work | working = working, waitingFor = waitingFor }
+
+        ActivityUpdate replyTo (Activity.AddComment comment) ->
+            Update.add (o lens activities) activityDesc <|
+                \id ->
+                    { id = id
+                    , type_ = Comment
+                    , createdAt = serverTimestamp
+                    , text = comment
+                    , author = myRef auth
+                    , replyTo =
+                        if replyTo == Id.null then
+                            Nothing
+
+                        else
+                            Just <|
+                                ActivityRef <|
+                                    Activity.ref projectId workId replyTo
+                    , mentionTo = []
+                    }
+
+        ActivityUpdate id Activity.DeleteComment ->
+            Update.delete (o lens <| activity id) activityDesc
+
+        ActivityUpdate id Activity.CancelSubmission ->
+            Update.all
+                [ Update.delete (o lens <| activity id) activityDesc
+                , Update.modify lens workDesc <|
+                    \work ->
+                        { work | working = work.staffs, reviewing = [] }
+                , Update.succeed CancelComplete
+                ]
+
+        ActivityUpdate id Activity.CancelAcception ->
+            Update.all
+                [ Update.delete (o lens <| activity id) activityDesc
+                , Update.modify lens workDesc <|
+                    \work ->
+                        { work | reviewing = work.reviewers }
+                , Update.succeed CancelComplete
+                ]
+
+        ActivityUpdate id Activity.CancelRejection ->
+            Update.all
+                [ Update.delete (o lens <| activity id) activityDesc
+                , Update.modify lens workDesc <|
+                    \work ->
+                        { work | working = [], reviewing = work.reviewers }
+                ]
 
         OtherWork workId_ upd_ ->
             update auth projectId workId_ worksLens upd_

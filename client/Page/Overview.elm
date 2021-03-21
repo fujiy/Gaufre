@@ -368,14 +368,18 @@ workCell auth model partIds process partId part work =
                 , style "cursor" "pointer"
                 , rowspan n
                 , onMouseDownStop <|
-                    SelectWork (Id.self work) (not selectedOnly) True
+                    if selectedOnly then
+                        MoveToWork process part work
+
+                    else
+                        SelectWork (Id.self work) (not selectedOnly) True
                 , onDragEnter <| SelectWork (Id.self work) (not selected) False
                 , onDoubleClick <| MoveToWork process part work
                 ]
                 [ Html.i
                     [ class <| Work.iconClass status
                     , class "icon"
-                    , if Work.isMember (myId auth) work then
+                    , if Work.isTheirTask (myId auth) work then
                         class <| Work.statusColor status
 
                       else
@@ -464,9 +468,8 @@ actions model project role members works =
                 selection
 
         statuses =
-            List.map Work.getStatus selection
-                |> List.sortBy Work.statusNumber
-                |> List.uniqueBy Work.statusNumber
+            List.map (\work -> ( Work.getStatus work, work )) selection
+                |> List.sortBy (Tuple.first >> Work.statusNumber)
 
         authority =
             Project.authority role
@@ -476,9 +479,6 @@ actions model project role members works =
                 (Work.getWorkProcess project work)
                 (Work.getWorkPart project work)
                 work
-
-        select work =
-            SelectWork (Id.self work) True True
     in
     div
         [ class "ui six wide column grid card"
@@ -535,17 +535,14 @@ actions model project role members works =
                     Work.selectionTitle project allWorks model.selection
                 ]
             , div [ class "description" ] <|
-                List.map Work.statusLabel statuses
-            , if List.member Work.Waiting statuses then
-                Html.map select <|
-                    div [ class "description" ] <|
-                        span [] [ text "未完了の前工程：" ]
-                            :: List.map
-                                (Work.waitingStatuses project allWorks)
-                                selection
-
-              else
-                text ""
+                flip List.map statuses <|
+                    \( _, work ) ->
+                        Work.infoLabels project
+                            (IdMap.fromListSelf members)
+                            allWorks
+                            work
+                            |> Html.map
+                                (\w -> SelectWork (Id.self w) True True)
             ]
         , when (not <| List.isEmpty selection) <|
             div [ class "content" ]

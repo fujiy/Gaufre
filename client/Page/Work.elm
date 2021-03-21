@@ -20,7 +20,7 @@ import Firestore.Path.Id.Map as IdMap
 import Firestore.Remote exposing (Remote(..))
 import Firestore.Update as Update exposing (Updater)
 import GDrive exposing (FileMeta)
-import Html exposing (Html, button, div, img, input, label, node, text, textarea)
+import Html exposing (Html, button, div, img, input, label, node, span, text, textarea)
 import Html.Attributes as Attr exposing (accept, attribute, class, hidden, href, placeholder, src, style, type_, value)
 import Html.Events exposing (onClick, onDoubleClick, onInput)
 import List.Extra as List
@@ -216,7 +216,29 @@ update auth msg projectId model =
             )
 
         WorkUpdate upd ->
-            ( model
+            let
+                clearCommentInput =
+                    case upd of
+                        Work.ActivityUpdate _ (Activity.AddComment _) ->
+                            True
+
+                        Work.Submit _ ->
+                            True
+
+                        Work.Accept _ ->
+                            True
+
+                        Work.Reject _ ->
+                            True
+
+                        _ ->
+                            False
+            in
+            ( if clearCommentInput then
+                { model | comment = "" }
+
+              else
+                model
             , Work.update auth
                 projectId
                 model.workId
@@ -372,6 +394,9 @@ view auth model data project =
 
                 status =
                     Work.getStatus work
+
+                invalidComment =
+                    String.isBlank model.comment
             in
             (\card ->
                 div [ class "ui grid" ]
@@ -391,10 +416,15 @@ view auth model data project =
                     , div [ class "meta" ]
                         [ breadcrumb model work |> Html.map MoveToFolder ]
                     , div [ class "description" ]
+                        [ Work.infoLabels project
+                            (IdMap.fromListSelf members)
+                            IdMap.empty
+                            work
+                            |> Html.map (\_ -> None)
+                        ]
+                    , div [ class "description" ]
                         [ div [ class "ui horizontal list" ]
                             [ div [ class "item" ]
-                                [ Work.statusLabel status ]
-                            , div [ class "item" ]
                                 [ text "担当："
                                 , User.list editable members staffs []
                                     |> Html.map
@@ -433,6 +463,7 @@ view auth model data project =
                     [ div [ class "header" ] [ text "アクティビティ" ]
                     , Work.activityTree auth
                         (IdMap.fromListSelf members)
+                        work
                         activities
                         |> Html.map WorkUpdate
                     , div [ class "ui reply form" ]
@@ -441,34 +472,56 @@ view auth model data project =
                                 [ Attr.rows 3
                                 , Attr.placeholder "コメント"
                                 , onInput InputComment
+                                , value model.comment
                                 ]
                                 []
                             ]
-                        , button
-                            [ class "ui blue labeled icon button"
-                            , classIf (String.isBlank model.comment) "disabled"
-                            , onClick <|
-                                WorkUpdate <|
-                                    Work.ActivityUpdate Id.null <|
-                                        Activity.AddComment model.comment
+                        , div
+                            [ attrIf invalidComment <|
+                                attribute "data-tooltip" "コメントを入力"
+                            , style "display" "inline-block"
                             ]
-                            [ icon "comment", text "コメント" ]
+                            [ button
+                                [ class "ui blue labeled icon button"
+                                , classIf invalidComment "disabled"
+                                , onClick <|
+                                    WorkUpdate <|
+                                        Work.ActivityUpdate Id.null <|
+                                            Activity.AddComment model.comment
+                                ]
+                                [ icon "comment", text "コメント" ]
+                            ]
                         , when (Work.isWorking (myId auth) work) <|
                             button
-                                [ class "ui green labeled icon button"
+                                [ class "ui teal labeled icon button"
                                 , onClick <|
                                     WorkUpdate <|
                                         Work.Submit model.comment
                                 ]
                                 [ icon "paper plane", text "提出" ]
                         , when (Work.isReviewing (myId auth) work) <|
-                            div
-                                [ class "ui green labeled icon button" ]
+                            button
+                                [ class "ui green labeled icon button"
+                                , onClick <|
+                                    WorkUpdate <|
+                                        Work.Accept model.comment
+                                ]
                                 [ icon "check", text "OK" ]
                         , when (Work.isReviewing (myId auth) work) <|
                             div
-                                [ class "ui red labeled icon button" ]
-                                [ icon "times", text "リテイク" ]
+                                [ attrIf invalidComment <|
+                                    attribute "data-tooltip" "理由を入力"
+                                , style "display" "inline-block"
+                                ]
+                                [ button
+                                    [ class "ui orange labeled icon button"
+                                    , classIf invalidComment "disabled"
+                                    , onClick <|
+                                        WorkUpdate <|
+                                            Work.Reject model.comment
+                                    ]
+                                    [ icon "times", text "リテイク" ]
+                                ]
                         ]
                     ]
                 ]

@@ -93,13 +93,13 @@ taskColor task =
             "blue"
 
         Reviewing ->
-            "orange"
+            "yellow"
 
         WaitingUpstream ->
             "grey"
 
         WaitingSubmit ->
-            "purple"
+            "brown"
 
         WaitingReview ->
             "olive"

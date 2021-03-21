@@ -62,7 +62,7 @@ ref id =
 label : msg -> User -> Html msg
 label msg user =
     a
-        [ class "ui small image label"
+        [ class "ui image label"
         , onClick msg
         ]
         [ img [ src user.image ] []
@@ -73,7 +73,7 @@ label msg user =
 label_ : User -> Html msg
 label_ user =
     div
-        [ class "ui small image label" ]
+        [ class "ui image label" ]
         [ img [ src user.image ] []
         , text user.name
         ]
@@ -82,7 +82,7 @@ label_ user =
 basicLabel_ : User -> Html msg
 basicLabel_ user =
     div
-        [ class "ui small disabled image label" ]
+        [ class "ui disabled image label" ]
         [ img [ src user.image ] []
         , text user.name
         ]
@@ -156,6 +156,6 @@ list editable choices actives inactives =
             text "なし"
 
         else
-            span [] <|
+            span [ class "ui labels" ] <|
                 List.map label_ activeUsers
                     ++ List.map basicLabel_ inactiveUsers

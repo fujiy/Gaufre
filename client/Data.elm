@@ -11,6 +11,7 @@ import Firestore.Path.Id.Map as IdMap
 import GDrive
 import Maybe.Extra as Maybe
 import Time
+import Zip.Entry exposing (lastModified)
 
 
 
@@ -106,7 +107,6 @@ type alias Activity =
     , text : String
     , author : Reference () User
     , replyTo : Maybe ActivityRef
-    , reject : Bool
     , mentionTo : List (Reference () User)
     }
 
@@ -118,7 +118,8 @@ type ActivityRef
 type ActivityType
     = Comment
     | Submission
-    | Review
+    | Acception
+    | Rejection
 
 
 
@@ -212,14 +213,14 @@ activityDesc =
             (Desc.enum
                 [ ( "comment", Comment )
                 , ( "submission", Submission )
-                , ( "review", Review )
+                , ( "acception", Acception )
+                , ( "rejection", Rejection )
                 ]
             )
             >> field "createdAt" .createdAt Desc.timestamp
             >> field "text" .text Desc.string
             >> field "author" .author Desc.reference
             >> maybe "replyTo" .replyTo activityRefDesc
-            >> field "reject" .reject Desc.bool
             >> field "mentionTo" .mentionTo Desc.references
 
 
