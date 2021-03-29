@@ -413,7 +413,6 @@ files_create_Task token name parents file =
                         , mimeType = Just <| File.mime file
                     }
             )
-        |> Task.mapError (Debug.log "ERROR")
 
 
 createFileAt :
@@ -471,8 +470,6 @@ createFileAt token parent path file =
                                     )
                                 )
                     )
-                |> Task.mapError (Debug.log "ERROR")
-                |> Task.map (Debug.log "SUCCEED")
 
 
 appendPath : String -> String -> String
@@ -617,17 +614,7 @@ request :
     -> Decoder a
     -> Cmd (Result Error a)
 request token method api options decoder =
-    Cmd.map
-        (Result.mapError <|
-            Debug.log <|
-                "GDrive Error: "
-                    ++ method
-                    ++ " "
-                    ++ api
-                    ++ Debug.toString options
-        )
-    <|
-        request_ token method api options Http.emptyBody decoder
+    request_ token method api options Http.emptyBody decoder
 
 
 request_ :

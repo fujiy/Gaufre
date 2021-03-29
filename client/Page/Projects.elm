@@ -77,8 +77,7 @@ update auth msg model =
                                 (\r ->
                                     case r of
                                         Err error ->
-                                            always (SearchResult []) <|
-                                                Debug.log "error" error
+                                            always (SearchResult []) error
 
                                         Ok files ->
                                             SearchResult files
@@ -102,8 +101,7 @@ update auth msg model =
                                     (\r ->
                                         case r of
                                             Err error ->
-                                                always (SearchResult []) <|
-                                                    Debug.log "error" error
+                                                always (SearchResult []) error
 
                                             Ok files_ ->
                                                 SearchResult files_

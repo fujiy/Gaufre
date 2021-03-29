@@ -71,7 +71,16 @@
 
        let app
 
+       let initialized = false
+
        function init() {
+           if (initialized) return
+
+           if (!gapi) {
+               setTimeout(() => {init()}, 1000)
+               return 
+           }
+
            gapi.load('auth2', () => {
                gapi.auth2.init({
                    client_id: '273402578765-dci5le4iheee0vt8s88u7fm0p4fv6cu7.apps.googleusercontent.com',
@@ -86,6 +95,8 @@
                    console.log('gapi error', error)
                })
            })
+
+           initialized = true
        }
 
        function signedIn(user) {
@@ -170,6 +181,9 @@
            })
 
            initialize(app)
+
+
+           setTimeout(() => {init()}, 1000)
        });
     </script>
   </body>
