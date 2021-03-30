@@ -183,8 +183,8 @@ collection name getter (DocumentDesc d) (CollectionDesc c) =
                 Collection
                     { name = Id name
                     , empty = d.empty
-                    , loading = True
                     , docs = IdMap.empty
+                    , all = Loading
                     , q = Dict.empty
                     }
 
@@ -205,16 +205,19 @@ collection name getter (DocumentDesc d) (CollectionDesc c) =
             else
                 case PathMap.getColRoot cpv of
                     Just Clear ->
-                        Ok <|
-                            Collection
-                                { col
-                                    | loading = True
-                                    , docs = IdMap.empty
-                                    , q = Dict.empty
-                                }
+                        Ok <| Collection { col | all = Loading }
 
-                    Just (Got _) ->
-                        Ok <| Collection { col | loading = False }
+                    Just (Got v) ->
+                        Decode.decodeValue (Decode.list d.decoder) v
+                            |> Result.map
+                                (\all ->
+                                    Collection
+                                        { col
+                                            | all =
+                                                List.map (Document d.empty) all
+                                                    |> UpToDate
+                                        }
+                                )
 
                     _ ->
                         Result.map2
@@ -265,8 +268,8 @@ collection name getter (DocumentDesc d) (CollectionDesc c) =
                                                     (Collection
                                                         { name = Id name
                                                         , empty = d.empty
-                                                        , loading = True
                                                         , docs = IdMap.empty
+                                                        , all = Loading
                                                         , q = Dict.empty
                                                         }
                                                     )

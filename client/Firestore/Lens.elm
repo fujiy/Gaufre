@@ -73,6 +73,22 @@ o (Lens ll) (Lens lr) =
                     (Accessor spq rc) =
                         Access.unremote <| Remote.map lr.access rb
                 in
+                -- case rb of
+                --     Failure ->
+                --         Accessor Slice.nothing Failure
+                --     Loading ->
+                --         Accessor Slice.nothing Loading
+                --     Committing b ->
+                --         let
+                --             (Accessor spq rc) =
+                --                 lr.access b
+                --         in
+                --         Accessor (Slice.compose sop spq) rc
+                --     UpToDate b ->
+                --         let
+                --             (Accessor spq rc) =
+                --                 lr.access b
+                --         in
                 Accessor (Slice.compose sop spq) rc
         , update =
             \u c ->
@@ -236,14 +252,7 @@ doc id =
                 Accessor
                     (Slice.doc id)
                     (IdMap.get id col.docs
-                        |> Maybe.withDefault
-                            (Document col.empty <|
-                                if col.loading then
-                                    Loading
-
-                                else
-                                    Failure
-                            )
+                        |> Maybe.withDefault (Document col.empty Loading)
                         |> UpToDate
                     )
         , update =
@@ -337,7 +346,7 @@ where_ field qop desc a =
                                         { col
                                             | docs = IdMap.empty
                                             , q = Dict.empty
-                                            , loading = True
+                                            , all = Loading
                                         }
                                     )
                      in
@@ -372,51 +381,16 @@ whereNotEmpty field =
     where_ field NE (Desc.list Desc.string) []
 
 
-getAllRemote : Lens Col (Collection s r) Item (List (Remote r))
-getAllRemote =
-    Lens
-        { access =
-            \(Collection col) ->
-                Accessor Slice.colItem
-                    (let
-                        ds =
-                            IdMap.items col.docs
-                                |> List.map (\(Document _ r) -> r)
-                     in
-                     if col.loading && List.isEmpty ds then
-                        Loading
-
-                     else
-                        UpToDate ds
-                    )
-        , update =
-            \_ _ ->
-                Updater <|
-                    \col ->
-                        { value = col
-                        , requests = Slice.colItem
-                        , afterwards = noUpdater
-                        }
-        }
-
-
 getAll : Lens Col (Collection s r) Item (List r)
 getAll =
     Lens
         { access =
             \(Collection col) ->
-                Accessor Slice.colItem
-                    (let
-                        ds =
-                            IdMap.items col.docs
-                                |> List.filterMap
-                                    (\(Document _ r) -> Remote.toMaybe r)
-                     in
-                     if col.loading && List.isEmpty ds then
-                        Loading
-
-                     else
-                        UpToDate ds
+                Accessor
+                    Slice.colItem
+                    (Remote.map
+                        (List.map (\(Document _ r) -> r) >> Remote.cats)
+                        col.all
                     )
         , update =
             \_ _ ->

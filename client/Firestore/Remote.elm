@@ -121,6 +121,11 @@ cats =
     List.filterMap toMaybe
 
 
+list : List (Remote a) -> Remote (List a)
+list =
+    List.foldr (map2 (::)) (UpToDate [])
+
+
 traverse : ((a -> Remote a) -> t -> r) -> (Remote x -> r) -> Remote t -> r
 traverse f default rx =
     case rx of

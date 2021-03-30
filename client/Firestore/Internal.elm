@@ -18,8 +18,8 @@ type Collection s r
     = Collection
         { name : Id r
         , empty : s
-        , loading : Bool
         , docs : IdMap.Map r (Document s r)
+        , all : Remote (List (Document s r))
         , q : Dict QueryKey (Collection s r)
         }
 

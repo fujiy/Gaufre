@@ -680,7 +680,7 @@ update auth projectId workId worksLens upd =
                                 upstreams
                     in
                     Update.map (\_ -> None) <|
-                        Update.default
+                        Update.default_
                             (o worksLens <|
                                 Lens.doc <|
                                     Id.fromString folder.id

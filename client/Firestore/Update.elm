@@ -362,6 +362,16 @@ default l d r =
     alter l d (Maybe.unwrap (Update r) (always NoChange))
 
 
+default_ :
+    Lens Root a Doc (Document s r)
+    -> DocumentDesc s r
+    -> r
+    -> Updater a r
+default_ l d r =
+    alter_ l d (Maybe.unwrap (Update r) (always NoChange))
+        |> map (Maybe.withDefault r)
+
+
 add :
     Lens Root a Col (Collection s r)
     -> DocumentDesc s r
@@ -385,8 +395,8 @@ add (Lens l) (DocumentDesc d) r =
                                     |> Maybe.andThen Path.getLast
                                     |> Maybe.withDefault Id.null
                             , empty = d.empty
-                            , loading = True
                             , docs = IdMap.empty
+                            , all = Loading
                             , q = Dict.empty
                             }
                         )

@@ -133,28 +133,12 @@ function initialize(app) {
           (querySnapshot) => {
             if (querySnapshot.metadata.hasPendingWrites) return;
 
-            const map = { item: null, sub: [], q: [] };
-            querySnapshot.docChanges().forEach((change) => {
-              switch (change.type) {
-                case "added":
-                case "modified":
-                  map.sub.push({
-                    item: makeDoc(change.doc),
-                    sub: [],
-                    id: change.doc.id,
-                  });
-                  break;
-                case "removed":
-                  map.sub.push({
-                    item: makeRemovedDoc(change.doc),
-                    sub: [],
-                    id: change.doc.id,
-                  });
-                  break;
-              }
-            });
+            const map = { item: [], sub: [], q: [] };
+            console.log(querySnapshot);
 
-            if (querySnapshot.empty) map.item = {};
+            querySnapshot.docs.forEach((doc) => {
+              map.item.push(makeDoc(doc));
+            });
 
             const updates = builder(map);
             console.log("snapshots", showPathMap(updates));

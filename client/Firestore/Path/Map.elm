@@ -384,7 +384,8 @@ clean (Root rd) =
 merge : (a -> a -> a) -> Map a -> Map a -> Map a
 merge f (Root da) (Root db) =
     Root <|
-        Dict.merge Dict.insert
+        Dict.merge
+            Dict.insert
             (\id pl pr -> Dict.insert id <| mergeCol f pl pr)
             Dict.insert
             da
@@ -396,14 +397,16 @@ mergeCol : (a -> a -> a) -> Col a -> Col a -> Col a
 mergeCol f (Col ma da qa) (Col mb db qb) =
     Col
         (orWith f ma mb)
-        (Dict.merge Dict.insert
+        (Dict.merge
+            Dict.insert
             (\id pl pr -> Dict.insert id <| mergeDoc f pl pr)
             Dict.insert
             da
             db
             Dict.empty
         )
-        (Dict.merge Dict.insert
+        (Dict.merge
+            Dict.insert
             (\id pl pr -> Dict.insert id <| mergeCol f pl pr)
             Dict.insert
             qa
@@ -416,7 +419,8 @@ mergeDoc : (a -> a -> a) -> Doc a -> Doc a -> Doc a
 mergeDoc f (Doc ma da) (Doc mb db) =
     Doc
         (orWith f ma mb)
-        (Dict.merge Dict.insert
+        (Dict.merge
+            Dict.insert
             (\id pl pr -> Dict.insert id <| mergeCol f pl pr)
             Dict.insert
             da
